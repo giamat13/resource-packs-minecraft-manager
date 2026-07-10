@@ -203,6 +203,23 @@
   <option value="entity.ender_dragon.growl"></option>
 </datalist>
 
+<datalist id="entitiesdl">
+  <option value="cow/cow"></option>
+  <option value="pig/pig"></option>
+  <option value="sheep/sheep"></option>
+  <option value="chicken"></option>
+  <option value="zombie/zombie"></option>
+  <option value="skeleton/skeleton"></option>
+  <option value="creeper/creeper"></option>
+  <option value="enderman/enderman"></option>
+  <option value="villager/villager"></option>
+  <option value="wolf/wolf"></option>
+  <option value="horse/horse_white"></option>
+  <option value="cat/black"></option>
+  <option value="spider/spider"></option>
+  <option value="blaze"></option>
+</datalist>
+
 <datalist id="searchdl">
   <option value="diamond_sword"></option>
   <option value="totem_of_undying"></option>
@@ -214,6 +231,8 @@
   <option value="glass"></option>
   <option value="bricks"></option>
   <option value="furnace"></option>
+  <option value="cow/cow"></option>
+  <option value="zombie/zombie"></option>
 </datalist>
 
 <div class="layout">
@@ -517,7 +536,7 @@ function renderMain(){
 
     <div class="card">
       <h3>🔍 מי אחראי על הפריט/בלוק?</h3>
-      <div class="hint" style="margin-top:-4px">חפש שם פריט <b>או בלוק</b> (למשל <code>diamond_sword</code>, <code>stone</code> או <code>mymod:ruby_sword</code>) ותראה איזה מקור קובע את הטקסטורה/מודל/בלוקסטייט שלו לפי סדר העדיפות הנוכחי — או אם זה נשאר ברירת המחדל של מיינקראפט. הטבלה בודקת גם את כל סוגי הפריט וגם את כל סוגי הבלוק בבת אחת.</div>
+      <div class="hint" style="margin-top:-4px">חפש שם פריט, בלוק <b>או ישות (entity)</b> (למשל <code>diamond_sword</code>, <code>stone</code>, <code>cow/cow</code> או <code>mymod:ruby_sword</code>) ותראה איזה מקור קובע את הטקסטורה/מודל/בלוקסטייט שלו לפי סדר העדיפות הנוכחי — או אם זה נשאר ברירת המחדל של מיינקראפט. הטבלה בודקת בבת אחת את כל סוגי הפריט, הבלוק והישות. לישויות במיינקראפט וניל יש רק טקסטורה הניתנת להחלפה — לא מודל (הצורה עצמה קבועה בקוד המשחק).</div>
       <div class="toolbar">
         <input type="text" id="itemQuery" list="searchdl" placeholder="diamond_sword / stone">
         <button id="itemSearchBtn">חפש</button>
@@ -963,12 +982,15 @@ function resolveNsPath(ref){
 const KIND_FOLDER = {
   "items":"item_model_def", "models/item":"item_model", "models/block":"block_model",
   "blockstates":"blockstate", "textures/item":"item_texture", "textures/block":"block_texture",
+  "textures/entity":"entity_texture",
 };
 const KIND_LABEL = {
   item_model_def:"הגדרת פריט (1.21.4+)", item_model:"מודל פריט", block_model:"מודל בלוק",
   blockstate:"בלוקסטייט", item_texture:"טקסטורת פריט", block_texture:"טקסטורת בלוק",
+  entity_texture:"טקסטורת ישות (entity)",
 };
-const ASSET_RE = /^assets\/([^/]+)\/(items|models\/item|models\/block|blockstates|textures\/item|textures\/block)\/(.+)\.(json|png)$/;
+// טקסטורות entity הן וניל תמיד — אין מנגנון resource-pack למודלים/blockstates של entities (המודל עצמו קבוע בקוד המשחק)
+const ASSET_RE = /^assets\/([^/]+)\/(items|models\/item|models\/block|blockstates|textures\/item|textures\/block|textures\/entity)\/(.+)\.(json|png)$/;
 const zipIndexCache = new Map(); // source.id -> {files:Set<string lowercase rel path>, byBasename:Map<string,[{ns,kind,path}]>}
 
 async function getSourceIndex(s){
@@ -978,6 +1000,7 @@ async function getSourceIndex(s){
   const prefix = findRootPrefix(zip);
   const files = new Set();
   const byBasename = new Map();
+  const assets = []; // רשימה שטוחה של כל {ns,kind,path} — משמש להתאמת תבניות עם * (ראה expandLockPattern)
   const pathMap = new Map(); // lowercase rel path -> נתיב בפועל בתוך ה-zip (רישיות מקורית)
   for(const pth of Object.keys(zip.files)){
     if(zip.files[pth].dir || !pth.startsWith(prefix)) continue;
@@ -988,12 +1011,13 @@ async function getSourceIndex(s){
     const m = rel.match(ASSET_RE);
     if(m){
       const ns=m[1], kind=KIND_FOLDER[m[2]], path=m[3];
+      assets.push({ns,kind,path});
       const basename = path.split("/").pop();
       if(!byBasename.has(basename)) byBasename.set(basename,[]);
       byBasename.get(basename).push({ns,kind,path});
     }
   }
-  const idx = {files, byBasename, zip, pathMap};
+  const idx = {files, byBasename, assets, zip, pathMap};
   zipIndexCache.set(s.id, idx);
   return idx;
 }
@@ -1498,7 +1522,128 @@ function lockCandidatePaths(kind, ns, path){
     `assets/${ns}/blockstates/${path}.json`,
     `assets/${ns}/models/item/${path}.json`,
   ];
+  if(kind==="entity") return [
+    `assets/${ns}/textures/entity/${path}.png`,
+  ];
   return [];
+}
+
+// תבנית עם * (ג'וקר) -> regex. "*_bed" מתאים ל-"white_bed", "red_bed" וכו'.
+function wildcardToRegex(pattern){
+  const esc = String(pattern).replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp("^"+esc+"$");
+}
+// לאיזה "kind" גס (מהתפריט) שייך כל kind עדין שמזהה index המקור
+const LOCK_KIND_ASSET_KINDS = {
+  item:["item_model_def","item_model","item_texture"], block:["block_model","blockstate","block_texture"],
+  entity:["entity_texture"],
+};
+
+// מרחיב תבנית עם * לרשימת {ns,path} קונקרטיים, לפי מה שבאמת קיים במקורות הרלוונטיים.
+// בלי * — מחזיר את הנכס כמות שהוא (ללא בדיקת קיום, כמו קודם).
+async function expandLockPattern(p, r, it){
+  if(!it.path.includes("*")) return [it];
+  const re = wildcardToRegex(it.path);
+  const results = new Map();
+  const sourcesToScan = (r.mode==="source" && r.sourceId)
+    ? p.sources.filter(s=>s.id===r.sourceId)
+    : p.sources;
+  if(r.kind==="sound"){
+    const jsonPath = `assets/${it.ns}/sounds.json`;
+    for(const s of sourcesToScan){
+      try{
+        const idx = await getSourceIndex(s);
+        if(!idx.files.has(jsonPath)) continue;
+        const bytes = await getSourceFileBytes(s, jsonPath);
+        const obj = JSON.parse(new TextDecoder("utf-8").decode(bytes));
+        for(const key of Object.keys(obj)){
+          if(re.test(key)) results.set(it.ns+":"+key, {ns:it.ns, path:key});
+        }
+      }catch{}
+    }
+    return [...results.values()];
+  }
+  const kinds = LOCK_KIND_ASSET_KINDS[r.kind] || [];
+  for(const s of sourcesToScan){
+    try{
+      const idx = await getSourceIndex(s);
+      for(const a of idx.assets){
+        if(a.ns!==it.ns || !kinds.includes(a.kind) || !re.test(a.path)) continue;
+        results.set(a.ns+":"+a.path, {ns:a.ns, path:a.path});
+      }
+    }catch{}
+  }
+  return [...results.values()];
+}
+
+// מחיל כלל חסימה/נעילה יחיד על נכס קונקרטי אחד (ns+path). מחזיר {ok, reason}
+async function applyOneLock(p, out, r, ns, path){
+  if(r.kind==="sound"){
+    const jsonPath = `assets/${ns}/sounds.json`;
+    if(r.mode==="vanilla"){
+      const existing = out.file(jsonPath);
+      if(existing){
+        try{
+          const obj = JSON.parse(await existing.async("string"));
+          if(obj[path]){ delete obj[path]; out.file(jsonPath, JSON.stringify(obj,null,2)); }
+        }catch{}
+      }
+      return {ok:true};
+    }
+    if(r.mode==="source" && r.sourceId){
+      const s = p.sources.find(x=>x.id===r.sourceId);
+      if(!s) return {ok:false, reason:"מקור לא נמצא"};
+      try{
+        const idx = await getSourceIndex(s);
+        if(!idx.files.has(jsonPath)) return {ok:false, reason:"אין sounds.json במקור הנבחר"};
+        const bytes = await getSourceFileBytes(s, jsonPath);
+        const srcObj = JSON.parse(new TextDecoder("utf-8").decode(bytes));
+        const def = srcObj[path];
+        if(!def) return {ok:false, reason:"האירוע לא מוגדר במקור הנבחר"};
+        const soundList = Array.isArray(def.sounds) ? def.sounds : [];
+        for(const snd of soundList){
+          const name = typeof snd==="string" ? snd : (snd&&snd.name);
+          if(!name) continue;
+          const {ns:sns, path:sp} = resolveNsPath(normalizeResourceLocation(name));
+          const oggRel = `assets/${sns}/sounds/${sp}.ogg`;
+          if(idx.files.has(oggRel)){
+            const oggBytes = await getSourceFileBytes(s, oggRel);
+            if(oggBytes) out.file(oggRel, oggBytes);
+          }
+        }
+        let obj = {};
+        const existing = out.file(jsonPath);
+        if(existing){ try{ obj = JSON.parse(await existing.async("string")); }catch{} }
+        obj[path] = def;
+        out.file(jsonPath, JSON.stringify(obj,null,2));
+        return {ok:true};
+      }catch(err){ return {ok:false, reason:err.message}; }
+    }
+    return {ok:false, reason:"מצב לא תקין"};
+  }
+  const paths = lockCandidatePaths(r.kind, ns, path);
+  if(r.mode==="vanilla"){
+    for(const pth of paths) out.remove(pth);
+    return {ok:true};
+  }
+  if(r.mode==="source" && r.sourceId){
+    const s = p.sources.find(x=>x.id===r.sourceId);
+    if(!s) return {ok:false, reason:"מקור לא נמצא"};
+    try{
+      const idx = await getSourceIndex(s);
+      let any=false;
+      for(const pth of paths){
+        if(idx.files.has(pth)){
+          const bytes = await getSourceFileBytes(s, pth);
+          if(bytes){ out.file(pth, bytes); any=true; }
+        } else {
+          out.remove(pth);
+        }
+      }
+      return {ok:any, reason: any?null:"לא נמצאו קבצים במקור הנבחר"};
+    }catch(err){ return {ok:false, reason:err.message}; }
+  }
+  return {ok:false, reason:"מצב לא תקין"};
 }
 
 async function applyLocks(p, out){
@@ -1507,74 +1652,20 @@ async function applyLocks(p, out){
   for(const r of rules){
     if(!r.assetId || !r.mode || !r.kind) continue;
     const it = parseNsId(r.assetId); if(!it.path) continue;
-    if(r.kind==="sound"){
-      const jsonPath = `assets/${it.ns}/sounds.json`;
-      if(r.mode==="vanilla"){
-        const existing = out.file(jsonPath);
-        if(existing){
-          try{
-            const obj = JSON.parse(await existing.async("string"));
-            if(obj[it.path]){ delete obj[it.path]; out.file(jsonPath, JSON.stringify(obj,null,2)); }
-          }catch{}
-        }
-        report.push({...r, ok:true});
-      } else if(r.mode==="source" && r.sourceId){
-        const s = p.sources.find(x=>x.id===r.sourceId);
-        if(!s){ report.push({...r, ok:false, reason:"מקור לא נמצא"}); continue; }
-        try{
-          const idx = await getSourceIndex(s);
-          if(!idx.files.has(jsonPath)){ report.push({...r, ok:false, reason:"אין sounds.json במקור הנבחר"}); continue; }
-          const bytes = await getSourceFileBytes(s, jsonPath);
-          const srcObj = JSON.parse(new TextDecoder("utf-8").decode(bytes));
-          const def = srcObj[it.path];
-          if(!def){ report.push({...r, ok:false, reason:"האירוע לא מוגדר במקור הנבחר"}); continue; }
-          const soundList = Array.isArray(def.sounds) ? def.sounds : [];
-          for(const snd of soundList){
-            const name = typeof snd==="string" ? snd : (snd&&snd.name);
-            if(!name) continue;
-            const {ns:sns, path:sp} = resolveNsPath(normalizeResourceLocation(name));
-            const oggRel = `assets/${sns}/sounds/${sp}.ogg`;
-            if(idx.files.has(oggRel)){
-              const oggBytes = await getSourceFileBytes(s, oggRel);
-              if(oggBytes) out.file(oggRel, oggBytes);
-            }
-          }
-          let obj = {};
-          const existing = out.file(jsonPath);
-          if(existing){ try{ obj = JSON.parse(await existing.async("string")); }catch{} }
-          obj[it.path] = def;
-          out.file(jsonPath, JSON.stringify(obj,null,2));
-          report.push({...r, ok:true});
-        }catch(err){ report.push({...r, ok:false, reason:err.message}); }
-      }
+    const matches = await expandLockPattern(p, r, it);
+    if(!matches.length){
+      report.push({...r, ok:false, reason: it.path.includes("*") ? "לא נמצאו התאמות לתבנית" : "לא נמצא"});
       continue;
     }
-    const paths = lockCandidatePaths(r.kind, it.ns, it.path);
-    if(r.mode==="vanilla"){
-      for(const path of paths) out.remove(path);
-      report.push({...r, ok:true});
-    } else if(r.mode==="source" && r.sourceId){
-      const s = p.sources.find(x=>x.id===r.sourceId);
-      if(!s){ report.push({...r, ok:false, reason:"מקור לא נמצא"}); continue; }
-      try{
-        const idx = await getSourceIndex(s);
-        let any=false;
-        for(const path of paths){
-          if(idx.files.has(path)){
-            const bytes = await getSourceFileBytes(s, path);
-            if(bytes){ out.file(path, bytes); any=true; }
-          } else {
-            out.remove(path);
-          }
-        }
-        report.push({...r, ok:any, reason: any?null:"לא נמצאו קבצים במקור הנבחר"});
-      }catch(err){ report.push({...r, ok:false, reason:err.message}); }
+    for(const m of matches){
+      const res = await applyOneLock(p, out, r, m.ns, m.path);
+      report.push({...r, assetId:`${m.ns}:${m.path}`, ok:res.ok, reason:res.reason});
     }
   }
   return report;
 }
 
-const LOCK_KIND_LABEL = {item:"פריט", block:"בלוק", sound:"סאונד"};
+const LOCK_KIND_LABEL = {item:"פריט", block:"בלוק", entity:"ישות (entity)", sound:"סאונד"};
 function renderLockSection(p){
   const card = document.getElementById("lockCard");
   if(!card) return;
@@ -1582,10 +1673,12 @@ function renderLockSection(p){
   const rules = p.locks.rules;
   const sourceOpts = p.sources.map((s,i)=>`<option value="${escapeAttr(s.id)}">#${i+1} ${escapeAttr(s.title||"מקור")}</option>`).join("");
   card.innerHTML = `
-    <h3>🔒 חסימה / נעילה לפריט, בלוק או סאונד</h3>
+    <h3>🔒 חסימה / נעילה לפריט, בלוק, ישות (entity) או סאונד</h3>
     <div class="hint" style="margin-top:-4px">
-      בלי קשר לסדר העדיפות של המקורות — אפשר לקבוע שפריט/בלוק/סאונד ספציפי <b>תמיד יישאר ברירת המחדל של מיינקראפט</b>,
+      בלי קשר לסדר העדיפות של המקורות — אפשר לקבוע שפריט/בלוק/ישות/סאונד ספציפי <b>תמיד יישאר ברירת המחדל של מיינקראפט</b>,
       או <b>תמיד יגיע ממקור מסוים</b> שבחרת. זה גובר על הכל, כולל טקסטורות מותאמות שהגדרת למעלה.
+      לישויות (entity) יש רק טקסטורה הניתנת לנעילה — אין מודל, כי הצורה של entity קבועה בקוד המשחק ולא ניתנת לשינוי דרך חבילת משאבים.
+      <br>💡 אפשר גם <b>תבנית עם *</b> כדי לתפוס כמה נכסים דומים בכלל אחד — למשל <code>*_bed</code> = כל צבעי המיטה, <code>*_wool</code> = כל הצמר, <code>cow/*</code> = כל טקסטורות הפרה. ההתאמה מבוססת על מה שבאמת קיים במקורות הרלוונטיים (כל המקורות במצב וניל, המקור הנבחר בלבד במצב "ממקור מסוים").
     </div>
     <div id="lockList"></div>
     <div class="toolbar"><button id="lockAddBtn" class="ghost">➕ הוסף כלל</button></div>
@@ -1597,7 +1690,7 @@ function renderLockSection(p){
   rules.forEach(r=>{
     if(!r.kind) r.kind="item";
     if(!r.mode) r.mode="vanilla";
-    const dl = r.kind==="item" ? "itemsdl" : r.kind==="block" ? "blocksdl" : "soundsdl";
+    const dl = r.kind==="item" ? "itemsdl" : r.kind==="block" ? "blocksdl" : r.kind==="entity" ? "entitiesdl" : "soundsdl";
     const row = document.createElement("div");
     row.className = "src";
     row.style.alignItems = "center";
@@ -1608,9 +1701,10 @@ function renderLockSection(p){
           <select class="lck-kind">
             <option value="item" ${r.kind==="item"?"selected":""}>פריט</option>
             <option value="block" ${r.kind==="block"?"selected":""}>בלוק</option>
+            <option value="entity" ${r.kind==="entity"?"selected":""}>ישות (entity)</option>
             <option value="sound" ${r.kind==="sound"?"selected":""}>סאונד</option>
           </select>
-          <input type="text" class="lck-id" list="${dl}" placeholder="מזהה (למשל diamond_sword)" value="${escapeAttr(r.assetId||"")}" style="min-width:200px">
+          <input type="text" class="lck-id" list="${dl}" placeholder="מזהה, אפשר * (למשל diamond_sword או *_bed)" value="${escapeAttr(r.assetId||"")}" style="min-width:220px">
           <button class="danger sm lck-del">🗑</button>
         </div>
         <div class="row" style="gap:8px">
