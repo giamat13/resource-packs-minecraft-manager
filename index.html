@@ -700,6 +700,51 @@ function findRootPrefix(zip){
   return "";
 }
 
+// ============================================================
+// מניעת "missing texture" (הדוגמת מגנטה-שחור): נורמליזציה + בדיקת שלמות
+// ============================================================
+
+// נתיב מודלים/בלוקסטייטס/הגדרות-פריט שמכילים הפניות לטקסטורות/מודלים אחרים
+const REF_JSON_RE = /^assets\/[^/]+\/(models|blockstates|items)\/.*\.json$/;
+
+// מיינקראפט דורש אותיות קטנות בכל שמות הקבצים; ריפרנס עם case שונה מהקובץ בפועל = טקסטורה חסרה במשחק
+function normalizeResourceLocation(loc){
+  if(typeof loc!=="string" || loc.startsWith("#")) return loc; // "#x" = הפניה למשתנה טקסטורה, לא נתיב קובץ
+  const idx = loc.indexOf(":");
+  if(idx<0) return loc.toLowerCase();
+  return loc.slice(0,idx).toLowerCase()+":"+loc.slice(idx+1).toLowerCase();
+}
+
+// הליכה רקורסיבית על JSON של מודל/בלוקסטייט/הגדרת-פריט: מנרמלת ל-lowercase ואוספת הפניות (textures / parent / model / base)
+function walkModelRefs(node, refs){
+  if(Array.isArray(node)){ node.forEach(n=>walkModelRefs(n,refs)); return; }
+  if(node && typeof node==="object"){
+    for(const key of Object.keys(node)){
+      const val = node[key];
+      if(key==="textures" && val && typeof val==="object" && !Array.isArray(val)){
+        for(const tk of Object.keys(val)){
+          if(typeof val[tk]==="string"){
+            val[tk] = normalizeResourceLocation(val[tk]);
+            if(refs && !val[tk].startsWith("#")) refs.textures.add(val[tk]);
+          }
+        }
+        continue;
+      }
+      if((key==="model"||key==="parent"||key==="base") && typeof val==="string"){
+        node[key] = normalizeResourceLocation(val);
+        if(refs) refs.models.add(node[key]);
+        continue;
+      }
+      walkModelRefs(val, refs);
+    }
+  }
+}
+
+function resolveNsPath(ref){
+  const idx = ref.indexOf(":");
+  return idx<0 ? {ns:"minecraft", path:ref} : {ns:ref.slice(0,idx), path:ref.slice(idx+1)};
+}
+
 async function buildProject(){
   const p = curProj();
   const log = document.getElementById("buildLog");
@@ -713,10 +758,11 @@ async function buildProject(){
 
     // מ־top לתחתון. index 0 = הכי גבוה (גובר)
     const out = new JSZip();
-    const claimed = new Map();       // path -> {title} (מי כתב ראשון = גבר)
+    const claimed = new Map();       // path (lowercase) -> {title} (מי כתב ראשון = גבר)
     const conflicts = [];            // {path, winner, loser}
     const jsonOverlaps = [];         // JSON חופפים לבדיקה ידנית
     let iconBytes = null, iconFrom=null;
+    let caseFixed = 0, jsonBroken = 0;
 
     for(let i=0;i<sources.length;i++){
       const s = sources[i];
@@ -740,23 +786,40 @@ async function buildProject(){
         if(rel==="pack.mcmeta"){ continue; }
         if(rel==="pack.png"){ if(!iconBytes){ iconBytes = await zip.files[pth].async("uint8array"); iconFrom=s.title; } continue; }
 
-        if(claimed.has(rel)){
+        // מיינקראפט דורש נתיבי-קבצים באותיות קטנות — נתיב "מעורב" הוא גורם נפוץ ל-missing texture
+        const lowRel = rel.toLowerCase();
+        if(lowRel!==rel) caseFixed++;
+
+        if(claimed.has(lowRel)){
           over++;
-          conflicts.push({path:rel, winner:claimed.get(rel).title, loser:s.title});
-          if(/\.(json|txt)$/.test(rel) && /(sounds\.json|\/lang\/|\.lang$)/.test(rel)){
-            jsonOverlaps.push({path:rel, winner:claimed.get(rel).title, loser:s.title});
+          conflicts.push({path:lowRel, winner:claimed.get(lowRel).title, loser:s.title});
+          if(/\.(json|txt)$/.test(lowRel) && /(sounds\.json|\/lang\/|\.lang$)/.test(lowRel)){
+            jsonOverlaps.push({path:lowRel, winner:claimed.get(lowRel).title, loser:s.title});
           }
           continue; // כבר נכתב ע"י מקור בעדיפות גבוהה יותר
         }
-        const data = await zip.files[pth].async("uint8array");
-        out.file(rel, data);
-        claimed.set(rel,{title:s.title});
+        let data = await zip.files[pth].async("uint8array");
+
+        // נרמול הפניות טקסטורה/מודל בתוך JSON למניעת missing texture עקב אי-התאמת רישיות
+        if(REF_JSON_RE.test(lowRel)){
+          try{
+            const text = new TextDecoder("utf-8").decode(data);
+            const obj = JSON.parse(text);
+            walkModelRefs(obj, null);
+            data = new TextEncoder().encode(JSON.stringify(obj));
+          }catch{ jsonBroken++; /* משאירים כמות שהוא, לא חוסם מיזוג */ }
+        }
+
+        out.file(lowRel, data);
+        claimed.set(lowRel,{title:s.title});
         added++;
       }
       logLine(`&nbsp;&nbsp;↳ נוספו <b>${added}</b> קבצים, ${over} נדרסו (עדיפות נמוכה)`, "ok");
     }
 
     if(!claimed.size){ logLine("לא נמצאו קבצים למיזוג.","err"); return; }
+    if(caseFixed) logLine(`🔡 תוקנו ${caseFixed} נתיבי-קבצים לאותיות קטנות (מונע missing texture מאי-התאמת רישיות)`,"dim");
+    if(jsonBroken) logLine(`⚠️ ${jsonBroken} קבצי JSON של מודלים/בלוקסטייטס לא היו תקינים ולא נורמלו (הועתקו כמות שהם)`,"warn");
 
     // pack.mcmeta חדש
     const mcmeta = {
@@ -772,6 +835,39 @@ async function buildProject(){
     if(jsonOverlaps.length){
       logLine(`⚠️ ${jsonOverlaps.length} קבצי sounds.json/שפה חופפים — מיינקראפט לוקח את הקובץ השלם מהמקור העליון. אם צריך מיזוג תוכן, בדוק ידנית:`,"warn");
       jsonOverlaps.slice(0,8).forEach(c=>logLine(`&nbsp;&nbsp;• ${escapeHtml(c.path)} (נשמר: ${escapeHtml(c.winner)})`,"warn"));
+    }
+
+    // בדיקת שלמות: הפניות שבורות ל-namespaces מותאמים אישית = ודאי missing texture (מגנטה-שחור) במשחק
+    logLine("🧪 בודק הפניות שבורות לטקסטורות/מודלים (namespaces מותאמים אישית)...","dim");
+    const missingTex = [], missingMdl = [];
+    const modelJsonPaths = Object.keys(out.files).filter(p=>!out.files[p].dir && REF_JSON_RE.test(p));
+    for(const pth of modelJsonPaths){
+      let obj;
+      try{ obj = JSON.parse(await out.files[pth].async("string")); }catch{ continue; }
+      const refs = {textures:new Set(), models:new Set()};
+      walkModelRefs(obj, refs);
+      for(const t of refs.textures){
+        const {ns,path:tp} = resolveNsPath(t);
+        if(ns==="minecraft") continue; // מניחים שוניל מספק — אין דרך לדעת בלי לצרף את כל assets ה-vanilla
+        const full = `assets/${ns}/textures/${tp}.png`;
+        if(!out.files[full]) missingTex.push({ref:t, full, from:pth});
+      }
+      for(const m of refs.models){
+        const {ns,path:mp} = resolveNsPath(m);
+        if(ns==="minecraft") continue;
+        const full = `assets/${ns}/models/${mp}.json`;
+        if(!out.files[full]) missingMdl.push({ref:m, full, from:pth});
+      }
+    }
+    if(missingTex.length || missingMdl.length){
+      logLine(`❌ נמצאו <b>${missingTex.length}</b> הפניות לטקסטורות ו-<b>${missingMdl.length}</b> הפניות למודלים שחסרים בפועל — אלה יופיעו כטקסטורה שחורה-ורודה (missing texture) במשחק:`,"err");
+      missingTex.slice(0,15).forEach(m=>logLine(`&nbsp;&nbsp;🖼️ חסר: <b>${escapeHtml(m.full)}</b> — מוזכר ב־${escapeHtml(m.from)}`,"err"));
+      missingMdl.slice(0,15).forEach(m=>logLine(`&nbsp;&nbsp;🧱 מודל חסר: <b>${escapeHtml(m.full)}</b> — מוזכר ב־${escapeHtml(m.from)}`,"err"));
+      const extra = (missingTex.length+missingMdl.length)-30;
+      if(extra>0) logLine(`&nbsp;&nbsp;...ועוד ${extra} נוספים`,"err");
+      logLine(`↳ תקן זאת במקור (חסר קובץ טקסטורה/מודל תואם), או הוסף מקור נוסף שמספק אותו.`,"warn");
+    } else {
+      logLine("✅ לא נמצאו הפניות שבורות ב-namespaces מותאמים אישית.","ok");
     }
 
     logLine("דוחס ל־ZIP...","dim");
