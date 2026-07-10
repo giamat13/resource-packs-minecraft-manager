@@ -59,17 +59,19 @@
 ## טקסטורות פריט מותאמות — רגיל + לפי שם (CIT)
 בכל פרויקט יש כרטיס **"🎨 טקסטורות פריט מותאמות"** שבו מגדירים כללים לכל פריט (לא רק טוטם):
 - **שם ריק** = טקסטורה רגילה לפריט (מחליפה את `assets/<ns>/textures/item/<item>.png`) — עובד בכל מיינקראפט, בלי תוספים.
-- **שם מלא** = הטקסטורה תחול רק כשקוראים לפריט בשם הזה (למשל טוטם ששמו `banana`). זה נוצר כ-**OptiFine CIT** (`assets/minecraft/optifine/cit/*.properties` + התמונה), ולכן **דורש OptiFine** או **CIT Resewn** (Fabric) כדי לפעול.
+- **שם מלא** = הטקסטורה תופיע רק כשקוראים לפריט בשם הזה בסדן (למשל טוטם ששמו `banana`). המנגנון תלוי בגרסת היעד:
+  - **גרסת יעד 1.21.4+ (pack_format 46+)** → נוצר כ-**item model וניל** (`assets/<ns>/items/<item>.json` עם `select` על הרכיב `minecraft:custom_name`, פלוס מודל+טקסטורה לכל וריאנט). **עובד בלי שום מוד, כולל עם Sodium.** זו בדיוק השיטה של חבילות כמו [Totem Pets](https://modrinth.com/resourcepack/totem-pets).
+  - **גרסה ישנה מ-1.21.4** → נוצר כ-**CIT** (`assets/minecraft/optifine/cit/*.properties`), שדורש [CIT Resewn](https://modrinth.com/mod/cit-resewn) או OptiFine (Sodium לבד לא קורא CIT).
 
-כל כלל = פריט (עם רשימת השלמה לפריטים נפוצים, אבל אפשר כל id כולל namespace) + שם + תמונה. הכללים גוברים על שאר המקורות בחבילה הממוזגת, נשמרים בדפדפן, ונכללים בייצוא/ייבוא.
+  מבנה ה-item model הווניל שנוצר:
+  ```json
+  { "model": { "type": "minecraft:select", "property": "minecraft:component",
+      "component": "minecraft:custom_name",
+      "cases": [ { "when": "banana", "model": { "type": "minecraft:model", "model": "minecraft:item/named_..." } } ],
+      "fallback": { "type": "minecraft:model", "model": "minecraft:item/totem_of_undying" } } }
+  ```
 
-הפורמט שנוצר לוריאנט לפי שם:
-```
-type=item
-items=minecraft:totem_of_undying
-texture=cit_<id>.png
-nbt.display.Name=ipattern:banana
-```
+כל כלל = פריט (עם רשימת השלמה לפריטים נפוצים, אבל אפשר כל id כולל namespace) + שם + תמונה. כמה וריאנטים לאותו פריט מקובצים אוטומטית להגדרת `items` אחת עם כמה `cases`. הכללים גוברים על שאר המקורות בחבילה הממוזגת, נשמרים בדפדפן, ונכללים בייצוא/ייבוא. הכרטיס מציג אוטומטית אם המנגנון יהיה וניל (1.21.4+) או CIT, לפי גרסת היעד.
 
 ## אייקון מותאם אישית (pack.png + אייקון ה-EXE)
 בהגדרות כל פרויקט אפשר להעלות **תמונה אחת** שמשמשת בשני מקומות בו-זמנית:
