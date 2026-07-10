@@ -526,17 +526,13 @@ function renderMain(){
       </div>
     </div>
 
-    <div class="card" id="citCard"></div>
-
-    <div class="card" id="blockCard"></div>
-
-    <div class="card" id="soundCard"></div>
+    <div class="card" id="customCard"></div>
 
     <div class="card" id="lockCard"></div>
 
     <div class="card">
       <h3>🔍 מי אחראי על הפריט/בלוק?</h3>
-      <div class="hint" style="margin-top:-4px">חפש שם פריט, בלוק <b>או ישות (entity)</b> (למשל <code>diamond_sword</code>, <code>stone</code>, <code>cow/cow</code> או <code>mymod:ruby_sword</code>) ותראה איזה מקור קובע את הטקסטורה/מודל/בלוקסטייט שלו לפי סדר העדיפות הנוכחי — או אם זה נשאר ברירת המחדל של מיינקראפט. הטבלה בודקת בבת אחת את כל סוגי הפריט, הבלוק והישות. לישויות במיינקראפט וניל יש רק טקסטורה הניתנת להחלפה — לא מודל (הצורה עצמה קבועה בקוד המשחק).</div>
+      <div class="hint" style="margin-top:-4px">חפש שם פריט, בלוק, <b>ישות (entity)</b> או <b>אירוע סאונד</b> (למשל <code>diamond_sword</code>, <code>stone</code>, <code>cow/cow</code>, <code>entity.player.hurt</code> או <code>mymod:ruby_sword</code>) ותראה איזה מקור קובע אותו לפי סדר העדיפות הנוכחי — או אם זה נשאר ברירת המחדל של מיינקראפט. הטבלה בודקת בבת אחת את כל סוגי הפריט, הבלוק, הישות והסאונד. לישויות במיינקראפט וניל יש רק טקסטורה הניתנת להחלפה — לא מודל (הצורה עצמה קבועה בקוד המשחק).</div>
       <div class="toolbar">
         <input type="text" id="itemQuery" list="searchdl" placeholder="diamond_sword / stone">
         <button id="itemSearchBtn">חפש</button>
@@ -582,12 +578,8 @@ function renderMain(){
   bind("buildBtn","click",buildProject);
   bind("buildExeBtn","click",buildInstallerExe);
   bind("exportProjBtn","click",()=>exportProject(p));
-  // --- טקסטורות פריט לפי שם (CIT) ---
-  renderCitSection(p);
-  // --- טקסטורות בלוק ---
-  renderBlockSection(p);
-  // --- סאונדים מותאמים ---
-  renderSoundSection(p);
+  // --- טקסטורות פריט/בלוק + סאונד מותאמים (כרטיס אחד משותף) ---
+  renderCustomAssetsSection(p);
   // --- חסימה/נעילה לפריט/בלוק/סאונד ---
   renderLockSection(p);
   // --- אייקון ---
@@ -1064,6 +1056,21 @@ async function searchItem(rawQuery){
     rows.push({kind,label,full,winner});
   }
 
+  // בדיקת אירוע סאונד — לא נבדק דרך existence של קובץ בודד אלא לפי מפתח בתוך sounds.json של ה-namespace
+  {
+    const soundJsonPath = `assets/${targetNs}/sounds.json`;
+    let soundWinner = null;
+    for(const s of enabledSources){
+      const idx = loadedIdx.get(s.id); if(!idx || !idx.files.has(soundJsonPath)) continue;
+      try{
+        const bytes = await getSourceFileBytes(s, soundJsonPath);
+        const obj = JSON.parse(new TextDecoder("utf-8").decode(bytes));
+        if(obj[targetPath]){ soundWinner = s; break; }
+      }catch{}
+    }
+    rows.push({kind:"sound_event", label:"אירוע סאונד", full:`${soundJsonPath} → "${targetPath}"`, winner:soundWinner});
+  }
+
   const lastSeg = targetPath.split("/").pop();
   const suggestions = [];
   for(const s of enabledSources){
@@ -1199,83 +1206,6 @@ async function buildItemFiles(p){
   return {files, normals, named, modern};
 }
 
-let _citUrls = [];
-function renderCitSection(p){
-  const card = document.getElementById("citCard");
-  if(!card) return;
-  _citUrls.forEach(u=>URL.revokeObjectURL(u)); _citUrls = [];
-  if(!p.cit) p.cit = {rules:[]};
-  const rules = p.cit.rules;
-  card.innerHTML = `
-    <h3>🎨 טקסטורות פריט מותאמות (רגיל + לפי שם)</h3>
-    <div class="hint" style="margin-top:-4px">
-      לכל פריט אפשר להגדיר טקסטורה. <b>שם ריק</b> = טקסטורה רגילה לפריט (עובד תמיד).
-      <b>שם מלא</b> = הטקסטורה תופיע רק כשקוראים לפריט בשם הזה בסדן (למשל טוטם בשם <code>banana</code>).
-    </div>
-    ${citIsModern(p)
-      ? `<div class="hint" style="margin-top:6px; padding:8px 10px; background:rgba(58,210,159,.12); border-radius:8px; border:1px solid rgba(58,210,159,.35)">
-          ✅ גרסת היעד (<b>${escapeHtml(p.targetVersion)}</b>) היא 1.21.5+, אז "לפי שם" נוצר כ-<b>item model וניל</b> —
-          עובד <b>בלי שום מוד</b>, כולל עם Sodium. (התמונה מוצגת כספרייט שטוח.)
-        </div>`
-      : `<div class="hint" style="margin-top:6px; padding:8px 10px; background:rgba(246,196,83,.12); border-radius:8px; border:1px solid rgba(246,196,83,.35)">
-          ⚠️ גרסת היעד (<b>${escapeHtml(p.targetVersion)}</b>) ישנה מ-1.21.5, אז "לפי שם" נוצר כ-CIT ודורש
-          <a href="https://modrinth.com/mod/cit-resewn" target="_blank">CIT Resewn</a> או OptiFine (זה כולל את 1.21.4).
-          כדי לקבל וניל בלי מודים — שנה את גרסת היעד ל-<b>1.21.5</b> ומעלה.
-        </div>`}
-    <div id="citList"></div>
-    <div class="toolbar"><button id="citAddBtn" class="ghost">➕ הוסף כלל</button></div>
-  `;
-  const list = card.querySelector("#citList");
-  if(!rules.length){
-    list.innerHTML = `<div class="hint">אין כללים. הוסף כלל, בחר פריט, (אופציונלי) שם, והעלה תמונה.</div>`;
-  }
-  rules.forEach(r=>{
-    const row = document.createElement("div");
-    row.className = "src";
-    row.style.alignItems = "center";
-    row.innerHTML = `
-      <div class="iconbox cit-prev" style="width:44px;height:44px;font-size:18px">🎨</div>
-      <div style="flex:1; display:flex; flex-direction:column; gap:6px">
-        <div class="row" style="gap:8px">
-          <input type="text" class="cit-item" list="itemsdl" placeholder="פריט (diamond_sword)" value="${escapeAttr(r.item||"")}" style="min-width:180px">
-          <input type="text" class="cit-name" placeholder="שם (ריק = רגיל)" value="${escapeAttr(r.name||"")}" style="min-width:160px">
-        </div>
-        <div class="row" style="gap:6px">
-          <button class="ghost sm cit-choose">${r.hasTex?"החלף תמונה":"העלה תמונה"}</button>
-          <button class="danger sm cit-del">🗑</button>
-          <input type="file" class="cit-file" accept="image/*" style="display:none">
-          <span class="hint" style="margin:0">${r.hasTex?(citName(r.name)?"וריאנט לפי שם":"טקסטורה רגילה"):"אין תמונה עדיין"}</span>
-        </div>
-      </div>`;
-    // preview
-    const prev = row.querySelector(".cit-prev");
-    if(r.hasTex){
-      DB.get("cit:"+p.id+":"+r.id).then(b=>{
-        if(b){ const u=URL.createObjectURL(new Blob([b])); _citUrls.push(u); prev.style.backgroundImage=`url(${u})`; prev.textContent=""; }
-      }).catch(()=>{});
-    }
-    row.querySelector(".cit-item").addEventListener("input",e=>{ r.item=e.target.value; save(); });
-    row.querySelector(".cit-name").addEventListener("input",e=>{ r.name=e.target.value; save(); });
-    row.querySelector(".cit-name").addEventListener("change",()=>renderCitSection(p));
-    row.querySelector(".cit-choose").addEventListener("click",()=>row.querySelector(".cit-file").click());
-    row.querySelector(".cit-file").addEventListener("change",async e=>{
-      const f=e.target.files[0]; e.target.value="";
-      if(!f) return;
-      if(f.size>8*1024*1024){ alert("התמונה גדולה מדי (מקס' 8MB)."); return; }
-      await DB.put("cit:"+p.id+":"+r.id, await f.arrayBuffer());
-      r.hasTex=true; save(); renderCitSection(p);
-    });
-    row.querySelector(".cit-del").addEventListener("click",async()=>{
-      if(r.hasTex) await DB.del("cit:"+p.id+":"+r.id).catch(()=>{});
-      p.cit.rules = p.cit.rules.filter(x=>x!==r); save(); renderCitSection(p);
-    });
-    list.appendChild(row);
-  });
-  card.querySelector("#citAddBtn").addEventListener("click",()=>{
-    p.cit.rules.push({id:uid(), item:"", name:"", hasTex:false}); save(); renderCitSection(p);
-  });
-}
-
 // ============================================================
 // טקסטורות בלוק מותאמות (אחיד לכל הצדדים, או נפרד לכל צד)
 // אין ל-blocks "שם" בסדן שמשפיע על המראה שלהם בעולם (בניגוד לפריטים) —
@@ -1329,93 +1259,6 @@ async function buildBlockFiles(p){
   return {files, normals, sided};
 }
 
-let _blockUrls = [];
-function renderBlockSection(p){
-  const card = document.getElementById("blockCard");
-  if(!card) return;
-  _blockUrls.forEach(u=>URL.revokeObjectURL(u)); _blockUrls = [];
-  if(!p.blocks) p.blocks = {rules:[]};
-  const rules = p.blocks.rules;
-  card.innerHTML = `
-    <h3>🧱 טקסטורות בלוק מותאמות</h3>
-    <div class="hint" style="margin-top:-4px">
-      בחר בלוק והעלה טקסטורה אחת לכל הצדדים, או טקסטורה נפרדת לכל צד.
-      <b>אין ל-blocks "שם" בסדן שמשפיע על המראה בעולם</b> (זה שונה מפריטים) — זו תמיד החלפה ישירה.
-      מתאים רק ל<b>בלוקי-קובייה פשוטים</b> (אבן, עץ, בלוקי מתכת/אדמה) — לא לבלוקים עם צורה/סיבוב (מדרגות, פלחים, בולי-עץ מכוונים).
-    </div>
-    <div id="blockList"></div>
-    <div class="toolbar"><button id="blockAddBtn" class="ghost">➕ הוסף כלל</button></div>
-  `;
-  const list = card.querySelector("#blockList");
-  if(!rules.length){
-    list.innerHTML = `<div class="hint">אין כללים. הוסף כלל ובחר בלוק.</div>`;
-  }
-  rules.forEach(r=>{
-    if(!r.mode) r.mode="all";
-    const row = document.createElement("div");
-    row.className = "src";
-    row.style.alignItems = "center";
-    row.style.flexWrap = "wrap";
-    let uploadsHtml;
-    if(r.mode==="sides"){
-      uploadsHtml = BLOCK_FACES.map(f=>`
-        <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
-          <div class="iconbox blk-prev" data-face="${f}" style="width:34px;height:34px;font-size:11px">${blockFaceLabel(f)}</div>
-          <button class="ghost sm blk-choose" data-face="${f}" style="font-size:11px;padding:2px 6px">📤</button>
-          <input type="file" class="blk-file" data-face="${f}" accept="image/*" style="display:none">
-        </div>`).join("");
-    } else {
-      uploadsHtml = `
-        <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
-          <div class="iconbox blk-prev" data-face="all" style="width:44px;height:44px;font-size:18px">🧱</div>
-          <button class="ghost sm blk-choose" data-face="all">${r.hasAll?"החלף":"העלה"} תמונה</button>
-          <input type="file" class="blk-file" data-face="all" accept="image/*" style="display:none">
-        </div>`;
-    }
-    row.innerHTML = `
-      <div style="flex:1; display:flex; flex-direction:column; gap:6px">
-        <div class="row" style="gap:8px">
-          <input type="text" class="blk-id" list="blocksdl" placeholder="בלוק (stone)" value="${escapeAttr(r.block||"")}" style="min-width:180px">
-          <select class="blk-mode">
-            <option value="all" ${r.mode==="all"?"selected":""}>טקסטורה אחידה לכל הצדדים</option>
-            <option value="sides" ${r.mode==="sides"?"selected":""}>טקסטורה נפרדת לכל צד</option>
-          </select>
-          <button class="danger sm blk-del">🗑</button>
-        </div>
-        <div class="row" style="gap:6px; flex-wrap:wrap">${uploadsHtml}</div>
-      </div>`;
-    list.appendChild(row);
-    row.querySelectorAll(".blk-prev").forEach(prev=>{
-      const face = prev.dataset.face;
-      DB.get(`blk:${p.id}:${r.id}:${face}`).then(b=>{
-        if(b){ const u=URL.createObjectURL(new Blob([b])); _blockUrls.push(u); prev.style.backgroundImage=`url(${u})`; prev.style.backgroundSize="cover"; prev.textContent=""; }
-      }).catch(()=>{});
-    });
-    row.querySelector(".blk-id").addEventListener("input",e=>{ r.block=e.target.value; save(); });
-    row.querySelector(".blk-mode").addEventListener("change",e=>{ r.mode=e.target.value; save(); renderBlockSection(p); });
-    row.querySelectorAll(".blk-choose").forEach(btn=>{
-      btn.addEventListener("click",()=>row.querySelector(`.blk-file[data-face="${btn.dataset.face}"]`).click());
-    });
-    row.querySelectorAll(".blk-file").forEach(inp=>{
-      inp.addEventListener("change",async e=>{
-        const f=e.target.files[0]; e.target.value="";
-        if(!f) return;
-        if(f.size>8*1024*1024){ alert("התמונה גדולה מדי (מקס' 8MB)."); return; }
-        await DB.put(`blk:${p.id}:${r.id}:${inp.dataset.face}`, await f.arrayBuffer());
-        if(inp.dataset.face==="all") r.hasAll=true;
-        save(); renderBlockSection(p);
-      });
-    });
-    row.querySelector(".blk-del").addEventListener("click",async()=>{
-      for(const f of ["all",...BLOCK_FACES]) await DB.del(`blk:${p.id}:${r.id}:${f}`).catch(()=>{});
-      p.blocks.rules = p.blocks.rules.filter(x=>x!==r); save(); renderBlockSection(p);
-    });
-  });
-  card.querySelector("#blockAddBtn").addEventListener("click",()=>{
-    p.blocks.rules.push({id:uid(), block:"", mode:"all", hasAll:false}); save(); renderBlockSection(p);
-  });
-}
-
 // ============================================================
 // צלילים מותאמים אישית — מחליפים לגמרי אירוע סאונד קיים (sounds.json)
 // ============================================================
@@ -1449,59 +1292,206 @@ async function applySoundOverrides(p, out){
   return count;
 }
 
-function renderSoundSection(p){
-  const card = document.getElementById("soundCard");
-  if(!card) return;
+// ============================================================
+// כרטיס מאוחד: טקסטורות פריט (CIT) + טקסטורות בלוק + סאונד — רשימת כללים משותפת אחת.
+// הנתונים עדיין נשמרים בנפרד (p.cit/p.blocks/p.sounds) כדי לא לשבור build/ייצוא-ייבוא,
+// אבל התצוגה, ההוספה והמחיקה עוברות דרך רשימה אחת ממוינת לפי p.customAssetsSeq.
+// ============================================================
+function nextSeq(p){ p.customAssetsSeq = (p.customAssetsSeq||0)+1; return p.customAssetsSeq; }
+function ensureCustomAssetDefaults(p){
+  if(!p.cit) p.cit = {rules:[]};
+  if(!p.blocks) p.blocks = {rules:[]};
   if(!p.sounds) p.sounds = {rules:[]};
-  const rules = p.sounds.rules;
-  card.innerHTML = `
-    <h3>🔊 צלילים מותאמים אישית</h3>
-    <div class="hint" style="margin-top:-4px">
-      בחר אירוע סאונד (למשל <code>entity.player.levelup</code>) והעלה קובץ <b>OGG Vorbis</b> —
-      הוא <b>יחליף לגמרי</b> את הצליל הרגיל של האירוע הזה. פורמטים אחרים (mp3/wav) לא יעבדו במשחק.
-    </div>
-    <div id="soundList"></div>
-    <div class="toolbar"><button id="soundAddBtn" class="ghost">➕ הוסף כלל</button></div>
-  `;
-  const list = card.querySelector("#soundList");
-  if(!rules.length){
-    list.innerHTML = `<div class="hint">אין כללים. הוסף כלל, בחר אירוע סאונד, והעלה קובץ OGG.</div>`;
+  for(const r of [...p.cit.rules, ...p.blocks.rules, ...p.sounds.rules]){
+    if(r.seq==null) r.seq = nextSeq(p);
   }
-  rules.forEach(r=>{
+}
+// מעביר כלל מ-kind אחד לאחר: מוחק blobs ישנים, בונה כלל חדש בצורת ה-kind היעד, שומר את מיקומו ברשימה (seq)
+async function changeRuleKind(p, oldKind, r, newKind){
+  if(oldKind===newKind) return;
+  if(oldKind==="item"){ if(r.hasTex) await DB.del("cit:"+p.id+":"+r.id).catch(()=>{}); p.cit.rules = p.cit.rules.filter(x=>x!==r); }
+  else if(oldKind==="block"){ for(const f of ["all",...BLOCK_FACES]) await DB.del(`blk:${p.id}:${r.id}:${f}`).catch(()=>{}); p.blocks.rules = p.blocks.rules.filter(x=>x!==r); }
+  else if(oldKind==="sound"){ if(r.hasAudio) await DB.del(`snd:${p.id}:${r.id}`).catch(()=>{}); p.sounds.rules = p.sounds.rules.filter(x=>x!==r); }
+  const seq = r.seq, id = uid();
+  if(newKind==="item") p.cit.rules.push({id, item:"", name:"", hasTex:false, seq});
+  else if(newKind==="block") p.blocks.rules.push({id, block:"", mode:"all", hasAll:false, seq});
+  else if(newKind==="sound") p.sounds.rules.push({id, event:"", hasAudio:false, seq});
+  save();
+}
+
+let _customPreviewUrls = [];
+function renderCustomAssetsSection(p){
+  const card = document.getElementById("customCard");
+  if(!card) return;
+  _customPreviewUrls.forEach(u=>URL.revokeObjectURL(u)); _customPreviewUrls = [];
+  ensureCustomAssetDefaults(p);
+  const combined = [
+    ...p.cit.rules.map(r=>({kind:"item", r})),
+    ...p.blocks.rules.map(r=>({kind:"block", r})),
+    ...p.sounds.rules.map(r=>({kind:"sound", r})),
+  ].sort((a,b)=>(a.r.seq||0)-(b.r.seq||0));
+
+  card.innerHTML = `
+    <h3>🎨 טקסטורות ואודיו מותאמים אישית (פריט + בלוק + סאונד)</h3>
+    <div class="hint" style="margin-top:-4px">
+      כלל אחד = פריט, בלוק או אירוע סאונד. אפשר לשנות את הסוג של כל כלל בכל רגע (בורר "סוג" בשורה).
+      <b>פריט</b>: שם ריק = טקסטורה רגילה; שם מלא = מופיע רק כשקוראים לפריט בשם הזה בסדן (תלוי-גרסה, ראו הערה בשורה).
+      <b>בלוק</b>: תמיד החלפה ישירה (לבלוקים אין מנגנון "שם בסדן" שמשפיע על המראה בעולם) — אחיד לכל הצדדים או נפרד לכל צד.
+      <b>סאונד</b>: מחליף לגמרי אירוע סאונד קיים בקובץ OGG שמעלים.
+    </div>
+    <div id="customList"></div>
+    <div class="toolbar"><button id="customAddBtn" class="ghost">➕ הוסף כלל</button></div>
+  `;
+  const list = card.querySelector("#customList");
+  if(!combined.length){
+    list.innerHTML = `<div class="hint">אין כללים. הוסף כלל ובחר סוג (פריט / בלוק / סאונד).</div>`;
+  }
+  combined.forEach(({kind, r})=>{
     const row = document.createElement("div");
     row.className = "src";
     row.style.alignItems = "center";
-    row.innerHTML = `
-      <div class="iconbox" style="width:44px;height:44px;font-size:18px">🔊</div>
-      <div style="flex:1; display:flex; flex-direction:column; gap:6px">
-        <div class="row" style="gap:8px">
-          <input type="text" class="snd-event" list="soundsdl" placeholder="אירוע (entity.player.levelup)" value="${escapeAttr(r.event||"")}" style="min-width:220px">
-        </div>
-        <div class="row" style="gap:6px; align-items:center">
-          <button class="ghost sm snd-choose">${r.hasAudio?"החלף קובץ":"העלה OGG"}</button>
-          <button class="danger sm snd-del">🗑</button>
-          <input type="file" class="snd-file" accept=".ogg,audio/ogg" style="display:none">
-          <span class="hint" style="margin:0">${r.hasAudio?"קובץ הועלה"+(r.audioName?` (${escapeHtml(r.audioName)})`:""):"אין קובץ עדיין"}</span>
-        </div>
-      </div>`;
+    row.style.flexWrap = "wrap";
+    const kindSelectHtml = `
+      <select class="ca-kind">
+        <option value="item" ${kind==="item"?"selected":""}>🎨 פריט</option>
+        <option value="block" ${kind==="block"?"selected":""}>🧱 בלוק</option>
+        <option value="sound" ${kind==="sound"?"selected":""}>🔊 סאונד</option>
+      </select>`;
+
+    if(kind==="item"){
+      row.innerHTML = `
+        <div class="iconbox ca-prev" style="width:44px;height:44px;font-size:18px">🎨</div>
+        <div style="flex:1; display:flex; flex-direction:column; gap:6px">
+          <div class="row" style="gap:8px">
+            ${kindSelectHtml}
+            <input type="text" class="ca-item" list="itemsdl" placeholder="פריט (diamond_sword)" value="${escapeAttr(r.item||"")}" style="min-width:170px">
+            <input type="text" class="ca-name" placeholder="שם (ריק = רגיל)" value="${escapeAttr(r.name||"")}" style="min-width:150px">
+          </div>
+          <div class="row" style="gap:6px; align-items:center">
+            <button class="ghost sm ca-choose">${r.hasTex?"החלף תמונה":"העלה תמונה"}</button>
+            <button class="danger sm ca-del">🗑</button>
+            <input type="file" class="ca-file" accept="image/*" style="display:none">
+            <span class="hint" style="margin:0">${r.hasTex?(citName(r.name)?"וריאנט לפי שם":"טקסטורה רגילה"):"אין תמונה עדיין"}</span>
+          </div>
+          ${citName(r.name) ? (citIsModern(p)
+            ? `<div class="hint" style="margin:0; color:var(--accent2)">✅ יעד ${escapeHtml(p.targetVersion)} (1.21.5+) — item model וניל, עובד בלי מודים.</div>`
+            : `<div class="hint" style="margin:0; color:var(--warn)">⚠️ יעד ${escapeHtml(p.targetVersion)} ישן מ-1.21.5 — ידרוש CIT Resewn/OptiFine.</div>`) : ""}
+        </div>`;
+      const prev = row.querySelector(".ca-prev");
+      if(r.hasTex){
+        DB.get("cit:"+p.id+":"+r.id).then(b=>{
+          if(b){ const u=URL.createObjectURL(new Blob([b])); _customPreviewUrls.push(u); prev.style.backgroundImage=`url(${u})`; prev.style.backgroundSize="cover"; prev.textContent=""; }
+        }).catch(()=>{});
+      }
+      row.querySelector(".ca-item").addEventListener("input",e=>{ r.item=e.target.value; save(); });
+      row.querySelector(".ca-name").addEventListener("input",e=>{ r.name=e.target.value; save(); });
+      row.querySelector(".ca-name").addEventListener("change",()=>renderCustomAssetsSection(p));
+      row.querySelector(".ca-choose").addEventListener("click",()=>row.querySelector(".ca-file").click());
+      row.querySelector(".ca-file").addEventListener("change",async e=>{
+        const f=e.target.files[0]; e.target.value="";
+        if(!f) return;
+        if(f.size>8*1024*1024){ alert("התמונה גדולה מדי (מקס' 8MB)."); return; }
+        await DB.put("cit:"+p.id+":"+r.id, await f.arrayBuffer());
+        r.hasTex=true; save(); renderCustomAssetsSection(p);
+      });
+      row.querySelector(".ca-del").addEventListener("click",async()=>{
+        if(r.hasTex) await DB.del("cit:"+p.id+":"+r.id).catch(()=>{});
+        p.cit.rules = p.cit.rules.filter(x=>x!==r); save(); renderCustomAssetsSection(p);
+      });
+    } else if(kind==="block"){
+      if(!r.mode) r.mode="all";
+      let uploadsHtml;
+      if(r.mode==="sides"){
+        uploadsHtml = BLOCK_FACES.map(f=>`
+          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+            <div class="iconbox ca-face-prev" data-face="${f}" style="width:34px;height:34px;font-size:11px">${blockFaceLabel(f)}</div>
+            <button class="ghost sm ca-choose" data-face="${f}" style="font-size:11px;padding:2px 6px">📤</button>
+            <input type="file" class="ca-file" data-face="${f}" accept="image/*" style="display:none">
+          </div>`).join("");
+      } else {
+        uploadsHtml = `
+          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+            <div class="iconbox ca-face-prev" data-face="all" style="width:44px;height:44px;font-size:18px">🧱</div>
+            <button class="ghost sm ca-choose" data-face="all">${r.hasAll?"החלף":"העלה"} תמונה</button>
+            <input type="file" class="ca-file" data-face="all" accept="image/*" style="display:none">
+          </div>`;
+      }
+      row.innerHTML = `
+        <div style="flex:1; display:flex; flex-direction:column; gap:6px">
+          <div class="row" style="gap:8px">
+            ${kindSelectHtml}
+            <input type="text" class="ca-block" list="blocksdl" placeholder="בלוק (stone)" value="${escapeAttr(r.block||"")}" style="min-width:150px">
+            <select class="ca-mode">
+              <option value="all" ${r.mode==="all"?"selected":""}>אחיד לכל הצדדים</option>
+              <option value="sides" ${r.mode==="sides"?"selected":""}>נפרד לכל צד</option>
+            </select>
+            <button class="danger sm ca-del">🗑</button>
+          </div>
+          <div class="row" style="gap:6px; flex-wrap:wrap">${uploadsHtml}</div>
+        </div>`;
+      row.querySelectorAll(".ca-face-prev").forEach(prev=>{
+        const face = prev.dataset.face;
+        DB.get(`blk:${p.id}:${r.id}:${face}`).then(b=>{
+          if(b){ const u=URL.createObjectURL(new Blob([b])); _customPreviewUrls.push(u); prev.style.backgroundImage=`url(${u})`; prev.style.backgroundSize="cover"; prev.textContent=""; }
+        }).catch(()=>{});
+      });
+      row.querySelector(".ca-block").addEventListener("input",e=>{ r.block=e.target.value; save(); });
+      row.querySelector(".ca-mode").addEventListener("change",e=>{ r.mode=e.target.value; save(); renderCustomAssetsSection(p); });
+      row.querySelectorAll(".ca-choose").forEach(btn=>{
+        btn.addEventListener("click",()=>row.querySelector(`.ca-file[data-face="${btn.dataset.face}"]`).click());
+      });
+      row.querySelectorAll(".ca-file").forEach(inp=>{
+        inp.addEventListener("change",async e=>{
+          const f=e.target.files[0]; e.target.value="";
+          if(!f) return;
+          if(f.size>8*1024*1024){ alert("התמונה גדולה מדי (מקס' 8MB)."); return; }
+          await DB.put(`blk:${p.id}:${r.id}:${inp.dataset.face}`, await f.arrayBuffer());
+          if(inp.dataset.face==="all") r.hasAll=true;
+          save(); renderCustomAssetsSection(p);
+        });
+      });
+      row.querySelector(".ca-del").addEventListener("click",async()=>{
+        for(const f of ["all",...BLOCK_FACES]) await DB.del(`blk:${p.id}:${r.id}:${f}`).catch(()=>{});
+        p.blocks.rules = p.blocks.rules.filter(x=>x!==r); save(); renderCustomAssetsSection(p);
+      });
+    } else { // sound
+      row.innerHTML = `
+        <div class="iconbox" style="width:44px;height:44px;font-size:18px">🔊</div>
+        <div style="flex:1; display:flex; flex-direction:column; gap:6px">
+          <div class="row" style="gap:8px">
+            ${kindSelectHtml}
+            <input type="text" class="ca-event" list="soundsdl" placeholder="אירוע (entity.player.levelup)" value="${escapeAttr(r.event||"")}" style="min-width:200px">
+          </div>
+          <div class="row" style="gap:6px; align-items:center">
+            <button class="ghost sm ca-choose">${r.hasAudio?"החלף קובץ":"העלה OGG"}</button>
+            <button class="danger sm ca-del">🗑</button>
+            <input type="file" class="ca-file" accept=".ogg,audio/ogg" style="display:none">
+            <span class="hint" style="margin:0">${r.hasAudio?"קובץ הועלה"+(r.audioName?` (${escapeHtml(r.audioName)})`:""):"אין קובץ עדיין"}</span>
+          </div>
+        </div>`;
+      row.querySelector(".ca-event").addEventListener("input",e=>{ r.event=e.target.value; save(); });
+      row.querySelector(".ca-choose").addEventListener("click",()=>row.querySelector(".ca-file").click());
+      row.querySelector(".ca-file").addEventListener("change",async e=>{
+        const f=e.target.files[0]; e.target.value="";
+        if(!f) return;
+        if(f.size>8*1024*1024){ alert("הקובץ גדול מדי (מקס' 8MB)."); return; }
+        if(!/\.ogg$/i.test(f.name) && !confirm("הקובץ לא נראה כמו OGG. מיינקראפט תומך רק ב-OGG Vorbis — קבצים אחרים לא יושמעו. להעלות בכל זאת?")) return;
+        await DB.put(`snd:${p.id}:${r.id}`, await f.arrayBuffer());
+        r.hasAudio=true; r.audioName=f.name; save(); renderCustomAssetsSection(p);
+      });
+      row.querySelector(".ca-del").addEventListener("click",async()=>{
+        if(r.hasAudio) await DB.del(`snd:${p.id}:${r.id}`).catch(()=>{});
+        p.sounds.rules = p.sounds.rules.filter(x=>x!==r); save(); renderCustomAssetsSection(p);
+      });
+    }
+    row.querySelector(".ca-kind").addEventListener("change", async e=>{
+      await changeRuleKind(p, kind, r, e.target.value);
+      renderCustomAssetsSection(p);
+    });
     list.appendChild(row);
-    row.querySelector(".snd-event").addEventListener("input",e=>{ r.event=e.target.value; save(); });
-    row.querySelector(".snd-choose").addEventListener("click",()=>row.querySelector(".snd-file").click());
-    row.querySelector(".snd-file").addEventListener("change",async e=>{
-      const f=e.target.files[0]; e.target.value="";
-      if(!f) return;
-      if(f.size>8*1024*1024){ alert("הקובץ גדול מדי (מקס' 8MB)."); return; }
-      if(!/\.ogg$/i.test(f.name) && !confirm("הקובץ לא נראה כמו OGG. מיינקראפט תומך רק ב-OGG Vorbis — קבצים אחרים לא יושמעו. להעלות בכל זאת?")) return;
-      await DB.put(`snd:${p.id}:${r.id}`, await f.arrayBuffer());
-      r.hasAudio=true; r.audioName=f.name; save(); renderSoundSection(p);
-    });
-    row.querySelector(".snd-del").addEventListener("click",async()=>{
-      if(r.hasAudio) await DB.del(`snd:${p.id}:${r.id}`).catch(()=>{});
-      p.sounds.rules = p.sounds.rules.filter(x=>x!==r); save(); renderSoundSection(p);
-    });
   });
-  card.querySelector("#soundAddBtn").addEventListener("click",()=>{
-    p.sounds.rules.push({id:uid(), event:"", hasAudio:false}); save(); renderSoundSection(p);
+  card.querySelector("#customAddBtn").addEventListener("click",()=>{
+    p.cit.rules.push({id:uid(), item:"", name:"", hasTex:false, seq:nextSeq(p)}); save(); renderCustomAssetsSection(p);
   });
 }
 
@@ -2132,7 +2122,7 @@ async function exportProject(p){
     if(p.cit && p.cit.rules && p.cit.rules.length){
       const rules = [];
       for(const r of p.cit.rules){
-        const rr = {id:r.id, item:r.item||"", name:r.name||"", hasTex:!!r.hasTex};
+        const rr = {id:r.id, item:r.item||"", name:r.name||"", hasTex:!!r.hasTex, seq:r.seq||0};
         if(r.hasTex){ try{ const b=await DB.get("cit:"+p.id+":"+r.id); if(b) rr.texBase64=bytesToBase64(b); else rr.hasTex=false; }catch{ rr.hasTex=false; } }
         rules.push(rr);
       }
@@ -2143,7 +2133,7 @@ async function exportProject(p){
     if(p.blocks && p.blocks.rules && p.blocks.rules.length){
       const rules = [];
       for(const r of p.blocks.rules){
-        const rr = {id:r.id, block:r.block||"", mode:r.mode||"all", hasAll:!!r.hasAll, tex:{}};
+        const rr = {id:r.id, block:r.block||"", mode:r.mode||"all", hasAll:!!r.hasAll, tex:{}, seq:r.seq||0};
         for(const f of ["all",...BLOCK_FACES]){
           try{ const b=await DB.get(`blk:${p.id}:${r.id}:${f}`); if(b) rr.tex[f]=bytesToBase64(b); }catch{}
         }
@@ -2156,7 +2146,7 @@ async function exportProject(p){
     if(p.sounds && p.sounds.rules && p.sounds.rules.length){
       const rules = [];
       for(const r of p.sounds.rules){
-        const rr = {id:r.id, event:r.event||"", hasAudio:!!r.hasAudio, audioName:r.audioName||""};
+        const rr = {id:r.id, event:r.event||"", hasAudio:!!r.hasAudio, audioName:r.audioName||"", seq:r.seq||0};
         if(r.hasAudio){ try{ const b=await DB.get(`snd:${p.id}:${r.id}`); if(b) rr.audioBase64=bytesToBase64(b); else rr.hasAudio=false; }catch{ rr.hasAudio=false; } }
         rules.push(rr);
       }
@@ -2224,7 +2214,7 @@ async function importProjectFromFile(file){
   if(src.cit && Array.isArray(src.cit.rules)){
     newP.cit = {rules:[]};
     for(const r of src.cit.rules){
-      const nr = {id:uid(), item:r.item||"", name:r.name||"", hasTex:false};
+      const nr = {id:uid(), item:r.item||"", name:r.name||"", hasTex:false, seq:r.seq||0};
       if(r.texBase64){ try{ await DB.put("cit:"+newP.id+":"+nr.id, base64ToBytes(r.texBase64).buffer); nr.hasTex=true; }catch{} }
       newP.cit.rules.push(nr);
     }
@@ -2232,7 +2222,7 @@ async function importProjectFromFile(file){
   if(src.blocks && Array.isArray(src.blocks.rules)){
     newP.blocks = {rules:[]};
     for(const r of src.blocks.rules){
-      const nr = {id:uid(), block:r.block||"", mode:r.mode||"all", hasAll:false};
+      const nr = {id:uid(), block:r.block||"", mode:r.mode||"all", hasAll:false, seq:r.seq||0};
       for(const [face,b64] of Object.entries(r.tex||{})){
         try{ await DB.put(`blk:${newP.id}:${nr.id}:${face}`, base64ToBytes(b64).buffer); if(face==="all") nr.hasAll=true; }catch{}
       }
@@ -2242,7 +2232,7 @@ async function importProjectFromFile(file){
   if(src.sounds && Array.isArray(src.sounds.rules)){
     newP.sounds = {rules:[]};
     for(const r of src.sounds.rules){
-      const nr = {id:uid(), event:r.event||"", hasAudio:false, audioName:r.audioName||""};
+      const nr = {id:uid(), event:r.event||"", hasAudio:false, audioName:r.audioName||"", seq:r.seq||0};
       if(r.audioBase64){ try{ await DB.put(`snd:${newP.id}:${nr.id}`, base64ToBytes(r.audioBase64).buffer); nr.hasAudio=true; }catch{} }
       newP.sounds.rules.push(nr);
     }
@@ -2254,6 +2244,11 @@ async function importProjectFromFile(file){
       newP.locks.rules.push({id:uid(), kind:r.kind||"item", assetId:r.assetId||"", mode:r.mode||"vanilla", sourceId});
     }
   }
+  newP.customAssetsSeq = Math.max(0,
+    ...((newP.cit&&newP.cit.rules)||[]).map(r=>r.seq||0),
+    ...((newP.blocks&&newP.blocks.rules)||[]).map(r=>r.seq||0),
+    ...((newP.sounds&&newP.sounds.rules)||[]).map(r=>r.seq||0),
+  );
   state.unshift(newP); selectedId=newP.id; localStorage.setItem(LS_SEL,newP.id);
   save(); renderAll();
   alert(`הפרויקט "${newP.name}" יובא בהצלחה עם ${newP.sources.length} מקורות, כולל הסדר, האייקון וקובצי ה־ZIP.`);
