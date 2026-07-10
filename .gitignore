@@ -21,6 +21,9 @@ __pycache__/
 installer/installer_icon.ico
 installer/installer_icon_preview.png
 
+# Playwright MCP test artifacts (accessibility snapshots, console logs)
+.playwright-mcp/
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db

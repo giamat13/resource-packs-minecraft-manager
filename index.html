@@ -39,8 +39,14 @@
   }
   .proj:hover{background:var(--panel2)}
   .proj.active{background:var(--panel2); border-color:var(--accent)}
-  .proj .nm{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .proj .nm{
+    flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    border:none; background:transparent; color:inherit; font:inherit; padding:2px 4px; border-radius:4px;
+  }
+  .proj .nm:hover, .proj .nm:focus{background:var(--panel)}
   .proj .ct{font-size:11px; color:var(--muted)}
+  .proj .projDelBtn{padding:2px 6px; font-size:12px; opacity:.55}
+  .proj .projDelBtn:hover{opacity:1}
   main{flex:1; overflow:auto; padding:18px 22px; min-width:0}
   .empty{color:var(--muted); text-align:center; margin-top:80px}
   h2{font-size:18px; margin:0 0 2px}
@@ -304,8 +310,10 @@
       שימושי במקרה של מחיקה או שינוי בטעות. שחזור מחליף את <b>כל</b> הפרויקטים הנוכחיים בדפדפן הזה בגיבוי שנבחר.
     </div>
     <div id="snapList" style="margin-top:10px"></div>
+    <div id="storageInfo" class="hint" style="margin-top:14px"></div>
   </div>
   <div class="dlg-f">
+    <button id="clearSnapsBtn" class="ghost sm">🗑️ מחק את כל הגיבויים</button>
     <button class="ghost" onclick="document.getElementById('snapDlg').close()">סגור</button>
   </div>
 </dialog>
@@ -431,7 +439,12 @@ function save(){
       localStorage.removeItem(LS_SNAP);
       localStorage.setItem(LS_KEY, json);
     }catch(err2){
-      alert("שגיאת אחסון: אין מספיק מקום פנוי בדפדפן לשמור את הפרויקטים (localStorage מלא), גם אחרי מחיקת הגיבויים האוטומטיים.\nמומלץ למחוק פרויקטים ישנים שאינם בשימוש.");
+      let usageLine = "";
+      try{
+        const {total, ours} = localStorageUsageReport();
+        usageLine = `\n\nמידע לאבחון: הנתונים שניסינו לשמור: ${(json.length/1024).toFixed(1)} KB. סה"כ שימוש ב-localStorage במקור ${location.hostname}: ${(total/1024).toFixed(1)} KB (מתוכם ${(ours/1024).toFixed(1)} KB שייכים לכלי הזה). אם total גדול בהרבה מ-ours, חלק ניכר מהמכסה תפוס ע"י אתר/פרויקט אחר שמתארח תחת אותו מקור.`;
+      }catch{}
+      alert("שגיאת אחסון: אין מספיק מקום פנוי בדפדפן לשמור את הפרויקטים (localStorage מלא), גם אחרי מחיקת הגיבויים האוטומטיים.\nמומלץ למחוק פרויקטים ישנים שאינם בשימוש (🗑️ ליד כל פרויקט ברשימה)."+usageLine);
       throw err2;
     }
   }
@@ -492,9 +505,19 @@ function renderProjects(){
   state.forEach(p=>{
     const d = document.createElement("div");
     d.className = "proj"+(p.id===selectedId?" active":"");
-    d.innerHTML = `<div class="nm">${escapeHtml(p.name)}</div>
-      <span class="ct">${p.sources.length}</span>`;
-    d.onclick = ()=>{ selectedId=p.id; localStorage.setItem(LS_SEL,p.id); renderAll(); };
+    d.innerHTML = `<input class="nm" value="${escapeAttr(p.name)}" title="שם הפרויקט">
+      <span class="ct">${p.sources.length}</span>
+      <button class="ghost sm projDelBtn" title="מחק פרויקט">🗑️</button>`;
+    d.onclick = (e)=>{ if(e.target.closest(".nm")||e.target.closest(".projDelBtn")) return; selectedId=p.id; localStorage.setItem(LS_SEL,p.id); renderAll(); };
+    const nmEl = d.querySelector(".nm");
+    nmEl.addEventListener("click", e=>e.stopPropagation());
+    nmEl.addEventListener("change", e=>{
+      p.name = e.target.value || "ללא שם";
+      e.target.value = p.name;
+      save();
+      if(p.id===selectedId){ const t=document.getElementById("pTitle"); if(t) t.textContent=p.name; const pn=document.getElementById("pName"); if(pn) pn.value=p.name; }
+    });
+    d.querySelector(".projDelBtn").addEventListener("click", e=>{ e.stopPropagation(); deleteProject(p); });
     el.appendChild(d);
   });
 }
@@ -2392,6 +2415,24 @@ async function duplicateProject(p){
   }
 }
 
+// מחיקת פרויקט: מוחקת גם את כל הבייטים שלו מ-IndexedDB (מקורות, אייקון, טקסטורות/אודיו מותאמים).
+async function deleteProject(p){
+  if(!confirm(`למחוק את הפרויקט "${p.name}"?\nהפעולה תמחק גם את כל קובצי המקור/אייקון/טקסטורות/אודיו שהועלו עבורו. אי אפשר לבטל.`)) return;
+  try{
+    for(const s of p.sources){ if(s.hasBlob) await DB.del(s.id); }
+    if(p.hasIcon) await DB.del("icon:"+p.id);
+    if(p.cit && Array.isArray(p.cit.rules)) for(const r of p.cit.rules) if(r.hasTex) await DB.del(`cit:${p.id}:${r.id}`);
+    if(p.blocks && Array.isArray(p.blocks.rules)) for(const r of p.blocks.rules) for(const f of ["all",...BLOCK_FACES]) await DB.del(`blk:${p.id}:${r.id}:${f}`);
+    if(p.sounds && Array.isArray(p.sounds.rules)) for(const r of p.sounds.rules) if(r.hasAudio) await DB.del(`snd:${p.id}:${r.id}`);
+  }catch{ /* ניקוי ה-blobs נכשל, ממשיכים למחוק את רשומת הפרויקט בכל זאת */ }
+  state = state.filter(x=>x.id!==p.id);
+  if(selectedId===p.id){
+    selectedId = (state[0] && state[0].id) || null;
+    localStorage.setItem(LS_SEL, selectedId||"");
+  }
+  save(); renderAll();
+}
+
 document.getElementById("importProjBtn").addEventListener("click",()=>{
   document.getElementById("importProjFile").click();
 });
@@ -2473,6 +2514,7 @@ setInterval(takeSnapshotIfChanged, SNAP_INTERVAL_MS);
 
 function openSnapshotsDialog(){
   renderSnapshotsList();
+  renderStorageInfo();
   document.getElementById("snapDlg").showModal();
 }
 function renderSnapshotsList(){
@@ -2495,6 +2537,33 @@ function renderSnapshotsList(){
     el.appendChild(d);
   });
 }
+// מודד כמה בייטים בערך תופס כל מפתח ב-localStorage של המקור הזה (giamat13.github.io כולו,
+// כולל פרויקטים אחרים שמתארחים תחת אותו מקור — הם חולקים אותה מכסת אחסון).
+function localStorageUsageReport(){
+  let total = 0, ours = 0;
+  for(let i=0;i<localStorage.length;i++){
+    const k = localStorage.key(i);
+    const v = localStorage.getItem(k) || "";
+    const bytes = (k.length + v.length) * 2; // הערכה גסה, UTF-16
+    total += bytes;
+    if(k===LS_KEY || k===LS_SNAP || k===LS_SEL) ours += bytes;
+  }
+  return {total, ours};
+}
+function renderStorageInfo(){
+  const el = document.getElementById("storageInfo");
+  if(!el) return;
+  const {total, ours} = localStorageUsageReport();
+  const kb = n => (n/1024).toFixed(1);
+  el.innerHTML = `אחסון (localStorage) במקור <b>${escapeHtml(location.hostname)}</b> — מכסה משותפת לכל האתרים שמתארחים תחת אותו מקור (למשל אתרי GitHub Pages אחרים שלך):<br>
+    סה"כ בשימוש: ${kb(total)} KB, מתוכם ${kb(ours)} KB שייכים לכלי הזה (פרויקטים + גיבויים).`;
+}
+document.getElementById("clearSnapsBtn").addEventListener("click", ()=>{
+  if(!confirm("למחוק את כל הגיבויים האוטומטיים? הפעולה לא משפיעה על הפרויקטים הנוכחיים, רק על נקודות השחזור.")) return;
+  localStorage.removeItem(LS_SNAP);
+  renderSnapshotsList();
+  renderStorageInfo();
+});
 function restoreSnapshot(snap){
   const dt = new Date(snap.at).toLocaleString("he-IL");
   if(!confirm(`לשחזר את הגיבוי מ-${dt}?\nזה יחליף את כל הפרויקטים הנוכחיים בדפדפן הזה (הגדרות בלבד — קבצי ZIP/תמונות/אודיו שהועלו לא נמחקים ולא משוחזרים, ה-IndexedDB לא נוגע).`)) return;
