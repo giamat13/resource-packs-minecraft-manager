@@ -421,7 +421,20 @@ function load(){
   try{ return JSON.parse(localStorage.getItem(LS_KEY)) || []; }catch{ return []; }
 }
 function save(){
-  localStorage.setItem(LS_KEY, JSON.stringify(state));
+  const json = JSON.stringify(state);
+  try{
+    localStorage.setItem(LS_KEY, json);
+  }catch(err){
+    // מכסת localStorage מלאה — קודם משחררים מקום ע"י מחיקת הגיבויים האוטומטיים
+    // (rpm.snapshots.v1, עד 20 עותקים מלאים של state), שהם פחות קריטיים מהנתונים החיים, ומנסים שוב.
+    try{
+      localStorage.removeItem(LS_SNAP);
+      localStorage.setItem(LS_KEY, json);
+    }catch(err2){
+      alert("שגיאת אחסון: אין מספיק מקום פנוי בדפדפן לשמור את הפרויקטים (localStorage מלא), גם אחרי מחיקת הגיבויים האוטומטיים.\nמומלץ למחוק פרויקטים ישנים שאינם בשימוש.");
+      throw err2;
+    }
+  }
   updateBadge();
 }
 function updateBadge(){
