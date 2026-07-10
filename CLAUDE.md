@@ -48,8 +48,8 @@ Logic is verified by pulling individual functions out of `index.html` with a reg
 
 **Storage split — this is central:**
 - Project configs (array) live in `localStorage` under `rpm.projects.v1` (+ `rpm.selected.v1`). Keep these small — only metadata and references.
-- All binary blobs live in `IndexedDB` (db `rpm-blobs`, store `blobs`), keyed by convention: uploaded source ZIPs by the source's `id`; project icon under `icon:<projectId>`; per-item-texture images under `cit:<projectId>:<ruleId>`. The `DB` helper wraps put/get/del.
-- A project is `{id, name, targetVersion, packFormat, description, sources[], hasIcon, cit:{rules[]}}`. Sources are ordered; **index 0 = highest priority (top of the stack, wins conflicts)**.
+- All binary blobs live in `IndexedDB` (db `rpm-blobs`, store `blobs`), keyed by convention: uploaded source ZIPs by the source's `id`; project icon under `icon:<projectId>`; per-item-texture images under `cit:<projectId>:<ruleId>`; per-block-texture images under `blk:<projectId>:<ruleId>:<face>` (`face` is `all` for uniform mode or one of `up/down/north/south/east/west`); per-sound audio under `snd:<projectId>:<ruleId>`. The `DB` helper wraps put/get/del.
+- A project is `{id, name, targetVersion, packFormat, description, sources[], hasIcon, cit:{rules[]}, blocks:{rules[]}, sounds:{rules[]}, locks:{rules[]}}`. Sources are ordered; **index 0 = highest priority (top of the stack, wins conflicts)**.
 
 **Merge engine** — `buildMergedPack()` is the shared core; `buildProject()` (download ZIP) and `buildInstallerExe()` (stitch into EXE) both call it. It:
 - iterates enabled sources top→bottom, "first writer wins" via a `claimed` map;
@@ -57,12 +57,18 @@ Logic is verified by pulling individual functions out of `index.html` with a reg
 - strips a wrapper folder inside a ZIP (`findRootPrefix`);
 - drops a texture's `.png.mcmeta` when it and its `.png` came from different sources (prevents corrupted animations);
 - generates a fresh `pack.mcmeta` from `packFormat`;
-- injects the custom `pack.png` and the item-texture files (these **override** sources — explicit user choice);
+- injects the custom `pack.png`, item-texture files, block-texture files, and sound overrides (these **override** sources — explicit user choice), then applies lock/block rules **last** (they override everything, including the user's own custom-texture rules);
 - runs a validator that flags broken texture/model/sound references in **non-`minecraft`** namespaces.
 
-**Version gating:** the `VERSIONS` table maps Minecraft versions → `pack_format`. `citIsModern(p)` returns `packFormat >= 46` (i.e. 1.21.4+) and switches feature behavior.
+**Version gating:** the `VERSIONS` table maps Minecraft versions → `pack_format`. `citIsModern(p)` returns `packFormat >= CIT_MODERN_MIN_PF` (55, i.e. **1.21.5+**) and switches feature behavior. Verified byte-for-byte against a real, working, downloaded Modrinth pack ("Totem's Renamed", 1.21.5+ only) — do not lower this threshold without re-verifying against a real pack.
 
-**Per-item custom textures** — `buildItemFiles(p)` groups rules by item. Blank rule name → replace `assets/<ns>/textures/item/<item>.png` directly (works everywhere). Named rule → on **1.21.4+**, a vanilla item model at `assets/<ns>/items/<item>.json` using `select` on the `minecraft:custom_name` component (no mods, works with Sodium); on older targets, OptiFine **CIT** `.properties` (needs OptiFine / CIT Resewn). Multiple names for one item are merged into one `items` definition with multiple `cases`.
+**Per-item custom textures** — `buildItemFiles(p)` groups rules by item. Blank rule name → replace `assets/<ns>/textures/item/<item>.png` directly (works everywhere). Named rule → on **1.21.5+**, a vanilla item model at `assets/<ns>/items/<item>.json` using `select` on the `minecraft:custom_name` component (no mods, works with Sodium); on older targets (including 1.21.4), OptiFine **CIT** `.properties` (needs OptiFine / CIT Resewn). Multiple names for one item are merged into one `items` definition with multiple `cases`.
+
+**Per-block custom textures** — `buildBlockFiles(p)` handles uniform ("all faces") or per-face rules. Unlike items, blocks have **no** anvil-rename/`custom_name` mechanism (that only affects the item form, never the placed block in the world — confirmed via research, not just assumed), so this is always a direct override: generates a custom block model (`minecraft:block/cube_all` or `minecraft:block/cube` parent) plus a blockstate that replaces **all** variants with a single one, plus a matching item model override so the inventory icon matches. Only correct for simple full-cube blocks with one blockstate variant (not stairs/slabs/logs/anything directional). Unfilled faces in per-face mode fall back to `<ns>:block/<block_id>` (assumes vanilla's texture filename matches the block id, true for most simple blocks).
+
+**Custom sounds** — `applySoundOverrides(p, out)` writes uploaded OGG files directly into the in-progress `out` zip and merges `replace:true` entries into that namespace's `sounds.json` (reads whatever the main merge loop already wrote there, so source-provided sounds.json entries are preserved except the overridden keys).
+
+**Item/block/sound locks** — `applyLocks(p, out)` lets a rule force a specific `item`/`block`/`sound` asset to always be vanilla (removes the known candidate file paths — see `lockCandidatePaths()` — from `out`) or always come from one specific chosen source regardless of priority order (pulls the raw bytes for those paths straight from that source's ZIP via `getSourceFileBytes()`). Runs after all other injection steps since it's meant to be the final, most explicit override.
 
 **Modrinth** is fully automated in-browser (its API + CDN send permissive CORS). **CurseForge / PlanetMinecraft** cannot be fetched from the browser (no CORS / no API), so those sources are manual ZIP uploads.
 

@@ -165,6 +165,57 @@
   <option value="paper"></option>
 </datalist>
 
+<datalist id="blocksdl">
+  <option value="stone"></option>
+  <option value="dirt"></option>
+  <option value="grass_block"></option>
+  <option value="oak_planks"></option>
+  <option value="oak_log"></option>
+  <option value="cobblestone"></option>
+  <option value="glass"></option>
+  <option value="diamond_block"></option>
+  <option value="gold_block"></option>
+  <option value="iron_block"></option>
+  <option value="emerald_block"></option>
+  <option value="obsidian"></option>
+  <option value="bricks"></option>
+  <option value="sand"></option>
+  <option value="gravel"></option>
+  <option value="netherrack"></option>
+  <option value="end_stone"></option>
+  <option value="bookshelf"></option>
+  <option value="crafting_table"></option>
+  <option value="furnace"></option>
+</datalist>
+
+<datalist id="soundsdl">
+  <option value="entity.player.hurt"></option>
+  <option value="entity.player.levelup"></option>
+  <option value="entity.experience_orb.pickup"></option>
+  <option value="entity.item.pickup"></option>
+  <option value="block.stone.break"></option>
+  <option value="block.wood.break"></option>
+  <option value="block.note_block.harp"></option>
+  <option value="entity.villager.yes"></option>
+  <option value="entity.zombie.ambient"></option>
+  <option value="ui.button.click"></option>
+  <option value="music_disc.13"></option>
+  <option value="entity.ender_dragon.growl"></option>
+</datalist>
+
+<datalist id="searchdl">
+  <option value="diamond_sword"></option>
+  <option value="totem_of_undying"></option>
+  <option value="stone"></option>
+  <option value="dirt"></option>
+  <option value="grass_block"></option>
+  <option value="oak_planks"></option>
+  <option value="oak_log"></option>
+  <option value="glass"></option>
+  <option value="bricks"></option>
+  <option value="furnace"></option>
+</datalist>
+
 <div class="layout">
   <aside>
     <div class="head">
@@ -458,11 +509,17 @@ function renderMain(){
 
     <div class="card" id="citCard"></div>
 
+    <div class="card" id="blockCard"></div>
+
+    <div class="card" id="soundCard"></div>
+
+    <div class="card" id="lockCard"></div>
+
     <div class="card">
-      <h3>🔍 מי אחראי על הפריט?</h3>
-      <div class="hint" style="margin-top:-4px">חפש שם פריט/בלוק (למשל <code>diamond_sword</code> או <code>mymod:ruby_sword</code>) ותראה איזה מקור קובע את הטקסטורה/מודל שלו לפי סדר העדיפות הנוכחי — או אם זה נשאר ברירת המחדל של מיינקראפט.</div>
+      <h3>🔍 מי אחראי על הפריט/בלוק?</h3>
+      <div class="hint" style="margin-top:-4px">חפש שם פריט <b>או בלוק</b> (למשל <code>diamond_sword</code>, <code>stone</code> או <code>mymod:ruby_sword</code>) ותראה איזה מקור קובע את הטקסטורה/מודל/בלוקסטייט שלו לפי סדר העדיפות הנוכחי — או אם זה נשאר ברירת המחדל של מיינקראפט. הטבלה בודקת גם את כל סוגי הפריט וגם את כל סוגי הבלוק בבת אחת.</div>
       <div class="toolbar">
-        <input type="text" id="itemQuery" placeholder="diamond_sword">
+        <input type="text" id="itemQuery" list="searchdl" placeholder="diamond_sword / stone">
         <button id="itemSearchBtn">חפש</button>
       </div>
       <div id="itemSearchResults" style="margin-top:10px"></div>
@@ -508,6 +565,12 @@ function renderMain(){
   bind("exportProjBtn","click",()=>exportProject(p));
   // --- טקסטורות פריט לפי שם (CIT) ---
   renderCitSection(p);
+  // --- טקסטורות בלוק ---
+  renderBlockSection(p);
+  // --- סאונדים מותאמים ---
+  renderSoundSection(p);
+  // --- חסימה/נעילה לפריט/בלוק/סאונד ---
+  renderLockSection(p);
   // --- אייקון ---
   refreshIconPreview(p);
   bind("iconChooseBtn","click",()=>document.getElementById("iconFile").click());
@@ -533,11 +596,17 @@ function renderMain(){
 }
 
 let dragSrcId = null;
+let srcSelection = new Set();
+let srcSelectionProjectId = null;
 
 function renderSources(){
   const p = curProj();
   const list = document.getElementById("srcList");
   if(!list) return;
+  if(srcSelectionProjectId !== p.id){ srcSelection.clear(); srcSelectionProjectId = p.id; }
+  // מנקים בחירה של מקורות שכבר לא קיימים (נמחקו)
+  const liveIds = new Set(p.sources.map(s=>s.id));
+  for(const id of [...srcSelection]) if(!liveIds.has(id)) srcSelection.delete(id);
   if(!p.sources.length){
     list.innerHTML = `<div class="hint">אין מקורות עדיין. הוסף חבילה מ־Modrinth/CurseForge/PlanetMinecraft או העלה ZIP.</div>`;
     return;
@@ -550,6 +619,24 @@ function renderSources(){
   legend.innerHTML = `<span>⬆️ <b>1 = הכי חשוב</b> (גובר על השאר)</span>
     <span class="dim">גרור לפי הידית ⠿ או השתמש ב־▲▼ כדי לסדר עדיפות</span>`;
   list.appendChild(legend);
+  // סרגל פעולות המוניות
+  const bulk = document.createElement("div");
+  bulk.className = "toolbar";
+  bulk.style.marginBottom = "8px";
+  const selCount = srcSelection.size;
+  bulk.innerHTML = `
+    <span class="hint" style="margin:0">${selCount ? `נבחרו ${selCount}` : "בחר מקורות לפעולה המונית:"}</span>
+    <button class="ghost sm" data-bulk="all">בחר הכל</button>
+    <button class="ghost sm" data-bulk="none" ${selCount?"":"disabled"}>נקה בחירה</button>
+    <button class="ghost sm" data-bulk="enable" ${selCount?"":"disabled"}>👁 הפעל נבחרים</button>
+    <button class="ghost sm" data-bulk="disable" ${selCount?"":"disabled"}>🚫 כבה נבחרים</button>
+    <button class="ghost sm" data-bulk="top" ${selCount?"":"disabled"}>⬆️ העבר לראש העדיפות</button>
+    <button class="ghost sm" data-bulk="bottom" ${selCount?"":"disabled"}>⬇️ העבר לסוף העדיפות</button>
+  `;
+  bulk.querySelectorAll("button[data-bulk]").forEach(b=>{
+    b.onclick = ()=>bulkSourceAction(b.dataset.bulk);
+  });
+  list.appendChild(bulk);
   p.sources.forEach((s,i)=>{
     const div = document.createElement("div");
     div.className = "src"+(s.enabled?"":" disabled");
@@ -564,6 +651,7 @@ function renderSources(){
     const prioTag = i===0 ? `<span class="prio-tag top">הכי חשוב</span>`
                   : i===p.sources.length-1 ? `<span class="prio-tag bottom">בסיס/גיבוי</span>` : "";
     div.innerHTML = `
+      <input type="checkbox" class="src-check" ${srcSelection.has(s.id)?"checked":""} title="בחר לפעולה המונית">
       <div class="grip" title="גרור לשינוי עדיפות">⠿</div>
       <div class="prio">${i+1}</div>
       <div class="ico">${icons[s.kind]||"❓"}</div>
@@ -580,6 +668,10 @@ function renderSources(){
     div.querySelectorAll("button[data-act]").forEach(b=>{
       b.onclick = ()=>srcAction(s.id,b.dataset.act);
     });
+    div.querySelector(".src-check").addEventListener("change",e=>{
+      if(e.target.checked) srcSelection.add(s.id); else srcSelection.delete(s.id);
+      renderSources();
+    });
     // גרירה לשינוי סדר — מופעלת רק דרך הידית
     const grip = div.querySelector(".grip");
     grip.addEventListener("mousedown",()=>{ div.draggable=true; });
@@ -590,6 +682,22 @@ function renderSources(){
     div.addEventListener("drop",e=>{ e.preventDefault(); div.classList.remove("over"); moveSource(dragSrcId, s.id); });
     list.appendChild(div);
   });
+}
+
+function bulkSourceAction(act){
+  const p = curProj();
+  if(act==="all"){ p.sources.forEach(s=>srcSelection.add(s.id)); renderSources(); return; }
+  if(act==="none"){ srcSelection.clear(); renderSources(); return; }
+  if(!srcSelection.size) return;
+  if(act==="enable" || act==="disable"){
+    const val = act==="enable";
+    p.sources.forEach(s=>{ if(srcSelection.has(s.id)) s.enabled = val; });
+  } else if(act==="top" || act==="bottom"){
+    const selected = p.sources.filter(s=>srcSelection.has(s.id));
+    const rest = p.sources.filter(s=>!srcSelection.has(s.id));
+    p.sources = act==="top" ? [...selected, ...rest] : [...rest, ...selected];
+  }
+  save(); renderSources(); renderProjects();
 }
 
 function moveSource(fromId,toId){
@@ -870,11 +978,13 @@ async function getSourceIndex(s){
   const prefix = findRootPrefix(zip);
   const files = new Set();
   const byBasename = new Map();
+  const pathMap = new Map(); // lowercase rel path -> נתיב בפועל בתוך ה-zip (רישיות מקורית)
   for(const pth of Object.keys(zip.files)){
     if(zip.files[pth].dir || !pth.startsWith(prefix)) continue;
     const rel = pth.slice(prefix.length).toLowerCase();
     if(!rel) continue;
     files.add(rel);
+    pathMap.set(rel, pth);
     const m = rel.match(ASSET_RE);
     if(m){
       const ns=m[1], kind=KIND_FOLDER[m[2]], path=m[3];
@@ -883,9 +993,17 @@ async function getSourceIndex(s){
       byBasename.get(basename).push({ns,kind,path});
     }
   }
-  const idx = {files, byBasename};
+  const idx = {files, byBasename, zip, pathMap};
   zipIndexCache.set(s.id, idx);
   return idx;
+}
+
+// קורא בייטים גולמיים של נתיב ספציפי (small-case) מתוך ה-ZIP של מקור — משמש לנעילת פריט/בלוק/סאונד למקור מסוים
+async function getSourceFileBytes(s, relLowerPath){
+  const idx = await getSourceIndex(s);
+  const actual = idx.pathMap.get(relLowerPath);
+  if(!actual) return null;
+  return await idx.zip.files[actual].async("uint8array");
 }
 
 async function searchItem(rawQuery){
@@ -986,13 +1104,15 @@ function renderItemSearchResults({q, targetNs, targetPath, rows, suggestions, sk
 // טקסטורות פריט מותאמות לפי שם (CIT — OptiFine / CIT Resewn)
 // כל כלל: פריט + שם (ריק = טקסטורה רגילה לפריט) + תמונה
 // ============================================================
-function citParseItem(raw){
+// פענוח ns:path כללי — משמש לפריטים, בלוקים ואירועי סאונד
+function parseNsId(raw){
   raw = String(raw||"").trim().toLowerCase().replace(/\s+/g,"_");
   const i = raw.indexOf(":");
   const ns = i<0 ? "minecraft" : (raw.slice(0,i)||"minecraft");
   const path = i<0 ? raw : raw.slice(i+1);
   return {ns, path, id:`${ns}:${path}`};
 }
+function citParseItem(raw){ return parseNsId(raw); }
 function citName(name){ return String(name||"").replace(/[\r\n=]/g,"").trim(); }
 function citPropsFor(slug, itemId, name){
   return `type=item\nitems=${itemId}\ntexture=${slug}.png\nnbt.display.Name=ipattern:${citName(name)}\n`;
@@ -1132,6 +1252,394 @@ function renderCitSection(p){
   });
 }
 
+// ============================================================
+// טקסטורות בלוק מותאמות (אחיד לכל הצדדים, או נפרד לכל צד)
+// אין ל-blocks "שם" בסדן שמשפיע על המראה שלהם בעולם (בניגוד לפריטים) —
+// זו תמיד החלפת טקסטורה/מודל ישירה, בלי מנגנון custom_name.
+// מתאים רק לבלוקי-קובייה פשוטים עם וריאנט blockstate יחיד.
+// ============================================================
+const BLOCK_FACES = ["up","down","north","south","east","west"];
+function blockFaceLabel(f){
+  return {up:"למעלה",down:"למטה",north:"צפון",south:"דרום",east:"מזרח",west:"מערב"}[f]||f;
+}
+
+// מייצר את קבצי המודל/בלוקסטייט/טקסטורה מהכללים. מחזיר {files, normals, sided}
+async function buildBlockFiles(p){
+  const files = [];
+  const rules = (p.blocks && p.blocks.rules) || [];
+  let normals=0, sided=0;
+  for(const r of rules){
+    if(!r.block) continue;
+    const it = parseNsId(r.block); if(!it.path) continue;
+    const slug = `rpm_block_${r.id}`;
+    if(r.mode==="sides"){
+      const texByFace = {};
+      let any=false;
+      for(const f of BLOCK_FACES){
+        let img; try{ const b = await DB.get(`blk:${p.id}:${r.id}:${f}`); if(b){ img=new Uint8Array(b); any=true; } }catch{}
+        if(img){
+          const fslug = `${slug}_${f}`;
+          files.push({path:`assets/${it.ns}/textures/block/${fslug}.png`, data:img});
+          texByFace[f] = `${it.ns}:block/${fslug}`;
+        } else {
+          // צד ללא העלאה — מניחים שהטקסטורה הוונילית חולקת שם עם הבלוק (נכון לרוב הבלוקים הפשוטים)
+          texByFace[f] = `${it.ns}:block/${it.path}`;
+        }
+      }
+      if(!any) continue;
+      const modelDef = { parent:"minecraft:block/cube", textures:{ particle: texByFace.north, ...texByFace } };
+      files.push({path:`assets/${it.ns}/models/block/${slug}.json`, data:JSON.stringify(modelDef,null,2)});
+      files.push({path:`assets/${it.ns}/blockstates/${it.path}.json`, data:JSON.stringify({variants:{"":{model:`${it.ns}:block/${slug}`}}},null,2)});
+      files.push({path:`assets/${it.ns}/models/item/${it.path}.json`, data:JSON.stringify({parent:`${it.ns}:block/${slug}`},null,2)});
+      sided++;
+    } else {
+      let img; try{ const b = await DB.get(`blk:${p.id}:${r.id}:all`); if(b) img=new Uint8Array(b); }catch{}
+      if(!img) continue;
+      files.push({path:`assets/${it.ns}/textures/block/${slug}.png`, data:img});
+      files.push({path:`assets/${it.ns}/models/block/${slug}.json`, data:JSON.stringify({parent:"minecraft:block/cube_all", textures:{all:`${it.ns}:block/${slug}`}},null,2)});
+      files.push({path:`assets/${it.ns}/blockstates/${it.path}.json`, data:JSON.stringify({variants:{"":{model:`${it.ns}:block/${slug}`}}},null,2)});
+      files.push({path:`assets/${it.ns}/models/item/${it.path}.json`, data:JSON.stringify({parent:`${it.ns}:block/${slug}`},null,2)});
+      normals++;
+    }
+  }
+  return {files, normals, sided};
+}
+
+let _blockUrls = [];
+function renderBlockSection(p){
+  const card = document.getElementById("blockCard");
+  if(!card) return;
+  _blockUrls.forEach(u=>URL.revokeObjectURL(u)); _blockUrls = [];
+  if(!p.blocks) p.blocks = {rules:[]};
+  const rules = p.blocks.rules;
+  card.innerHTML = `
+    <h3>🧱 טקסטורות בלוק מותאמות</h3>
+    <div class="hint" style="margin-top:-4px">
+      בחר בלוק והעלה טקסטורה אחת לכל הצדדים, או טקסטורה נפרדת לכל צד.
+      <b>אין ל-blocks "שם" בסדן שמשפיע על המראה בעולם</b> (זה שונה מפריטים) — זו תמיד החלפה ישירה.
+      מתאים רק ל<b>בלוקי-קובייה פשוטים</b> (אבן, עץ, בלוקי מתכת/אדמה) — לא לבלוקים עם צורה/סיבוב (מדרגות, פלחים, בולי-עץ מכוונים).
+    </div>
+    <div id="blockList"></div>
+    <div class="toolbar"><button id="blockAddBtn" class="ghost">➕ הוסף כלל</button></div>
+  `;
+  const list = card.querySelector("#blockList");
+  if(!rules.length){
+    list.innerHTML = `<div class="hint">אין כללים. הוסף כלל ובחר בלוק.</div>`;
+  }
+  rules.forEach(r=>{
+    if(!r.mode) r.mode="all";
+    const row = document.createElement("div");
+    row.className = "src";
+    row.style.alignItems = "center";
+    row.style.flexWrap = "wrap";
+    let uploadsHtml;
+    if(r.mode==="sides"){
+      uploadsHtml = BLOCK_FACES.map(f=>`
+        <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+          <div class="iconbox blk-prev" data-face="${f}" style="width:34px;height:34px;font-size:11px">${blockFaceLabel(f)}</div>
+          <button class="ghost sm blk-choose" data-face="${f}" style="font-size:11px;padding:2px 6px">📤</button>
+          <input type="file" class="blk-file" data-face="${f}" accept="image/*" style="display:none">
+        </div>`).join("");
+    } else {
+      uploadsHtml = `
+        <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+          <div class="iconbox blk-prev" data-face="all" style="width:44px;height:44px;font-size:18px">🧱</div>
+          <button class="ghost sm blk-choose" data-face="all">${r.hasAll?"החלף":"העלה"} תמונה</button>
+          <input type="file" class="blk-file" data-face="all" accept="image/*" style="display:none">
+        </div>`;
+    }
+    row.innerHTML = `
+      <div style="flex:1; display:flex; flex-direction:column; gap:6px">
+        <div class="row" style="gap:8px">
+          <input type="text" class="blk-id" list="blocksdl" placeholder="בלוק (stone)" value="${escapeAttr(r.block||"")}" style="min-width:180px">
+          <select class="blk-mode">
+            <option value="all" ${r.mode==="all"?"selected":""}>טקסטורה אחידה לכל הצדדים</option>
+            <option value="sides" ${r.mode==="sides"?"selected":""}>טקסטורה נפרדת לכל צד</option>
+          </select>
+          <button class="danger sm blk-del">🗑</button>
+        </div>
+        <div class="row" style="gap:6px; flex-wrap:wrap">${uploadsHtml}</div>
+      </div>`;
+    list.appendChild(row);
+    row.querySelectorAll(".blk-prev").forEach(prev=>{
+      const face = prev.dataset.face;
+      DB.get(`blk:${p.id}:${r.id}:${face}`).then(b=>{
+        if(b){ const u=URL.createObjectURL(new Blob([b])); _blockUrls.push(u); prev.style.backgroundImage=`url(${u})`; prev.style.backgroundSize="cover"; prev.textContent=""; }
+      }).catch(()=>{});
+    });
+    row.querySelector(".blk-id").addEventListener("input",e=>{ r.block=e.target.value; save(); });
+    row.querySelector(".blk-mode").addEventListener("change",e=>{ r.mode=e.target.value; save(); renderBlockSection(p); });
+    row.querySelectorAll(".blk-choose").forEach(btn=>{
+      btn.addEventListener("click",()=>row.querySelector(`.blk-file[data-face="${btn.dataset.face}"]`).click());
+    });
+    row.querySelectorAll(".blk-file").forEach(inp=>{
+      inp.addEventListener("change",async e=>{
+        const f=e.target.files[0]; e.target.value="";
+        if(!f) return;
+        if(f.size>8*1024*1024){ alert("התמונה גדולה מדי (מקס' 8MB)."); return; }
+        await DB.put(`blk:${p.id}:${r.id}:${inp.dataset.face}`, await f.arrayBuffer());
+        if(inp.dataset.face==="all") r.hasAll=true;
+        save(); renderBlockSection(p);
+      });
+    });
+    row.querySelector(".blk-del").addEventListener("click",async()=>{
+      for(const f of ["all",...BLOCK_FACES]) await DB.del(`blk:${p.id}:${r.id}:${f}`).catch(()=>{});
+      p.blocks.rules = p.blocks.rules.filter(x=>x!==r); save(); renderBlockSection(p);
+    });
+  });
+  card.querySelector("#blockAddBtn").addEventListener("click",()=>{
+    p.blocks.rules.push({id:uid(), block:"", mode:"all", hasAll:false}); save(); renderBlockSection(p);
+  });
+}
+
+// ============================================================
+// צלילים מותאמים אישית — מחליפים לגמרי אירוע סאונד קיים (sounds.json)
+// ============================================================
+
+// מזריק את קבצי הסאונד המותאמים ישירות לתוך ה-zip שנבנה (out), וממזג לתוך sounds.json הקיים לפי namespace.
+async function applySoundOverrides(p, out){
+  const rules = (p.sounds && p.sounds.rules) || [];
+  const byNs = new Map();
+  for(const r of rules){
+    if(!r.event || !r.hasAudio) continue;
+    const it = parseNsId(r.event); if(!it.path) continue;
+    let audio; try{ const b = await DB.get(`snd:${p.id}:${r.id}`); if(b) audio = new Uint8Array(b); }catch{}
+    if(!audio) continue;
+    if(!byNs.has(it.ns)) byNs.set(it.ns, []);
+    byNs.get(it.ns).push({path:it.path, id:r.id, audio});
+  }
+  let count=0;
+  for(const [ns, entries] of byNs){
+    const jsonPath = `assets/${ns}/sounds.json`;
+    let obj = {};
+    const existing = out.file(jsonPath);
+    if(existing){ try{ obj = JSON.parse(await existing.async("string")); }catch{ obj={}; } }
+    for(const e of entries){
+      const soundSlug = `rpm_sound_${e.id}`;
+      out.file(`assets/${ns}/sounds/${soundSlug}.ogg`, e.audio);
+      obj[e.path] = { sounds:[`${ns}:${soundSlug}`], replace:true };
+      count++;
+    }
+    out.file(jsonPath, JSON.stringify(obj, null, 2));
+  }
+  return count;
+}
+
+function renderSoundSection(p){
+  const card = document.getElementById("soundCard");
+  if(!card) return;
+  if(!p.sounds) p.sounds = {rules:[]};
+  const rules = p.sounds.rules;
+  card.innerHTML = `
+    <h3>🔊 צלילים מותאמים אישית</h3>
+    <div class="hint" style="margin-top:-4px">
+      בחר אירוע סאונד (למשל <code>entity.player.levelup</code>) והעלה קובץ <b>OGG Vorbis</b> —
+      הוא <b>יחליף לגמרי</b> את הצליל הרגיל של האירוע הזה. פורמטים אחרים (mp3/wav) לא יעבדו במשחק.
+    </div>
+    <div id="soundList"></div>
+    <div class="toolbar"><button id="soundAddBtn" class="ghost">➕ הוסף כלל</button></div>
+  `;
+  const list = card.querySelector("#soundList");
+  if(!rules.length){
+    list.innerHTML = `<div class="hint">אין כללים. הוסף כלל, בחר אירוע סאונד, והעלה קובץ OGG.</div>`;
+  }
+  rules.forEach(r=>{
+    const row = document.createElement("div");
+    row.className = "src";
+    row.style.alignItems = "center";
+    row.innerHTML = `
+      <div class="iconbox" style="width:44px;height:44px;font-size:18px">🔊</div>
+      <div style="flex:1; display:flex; flex-direction:column; gap:6px">
+        <div class="row" style="gap:8px">
+          <input type="text" class="snd-event" list="soundsdl" placeholder="אירוע (entity.player.levelup)" value="${escapeAttr(r.event||"")}" style="min-width:220px">
+        </div>
+        <div class="row" style="gap:6px; align-items:center">
+          <button class="ghost sm snd-choose">${r.hasAudio?"החלף קובץ":"העלה OGG"}</button>
+          <button class="danger sm snd-del">🗑</button>
+          <input type="file" class="snd-file" accept=".ogg,audio/ogg" style="display:none">
+          <span class="hint" style="margin:0">${r.hasAudio?"קובץ הועלה"+(r.audioName?` (${escapeHtml(r.audioName)})`:""):"אין קובץ עדיין"}</span>
+        </div>
+      </div>`;
+    list.appendChild(row);
+    row.querySelector(".snd-event").addEventListener("input",e=>{ r.event=e.target.value; save(); });
+    row.querySelector(".snd-choose").addEventListener("click",()=>row.querySelector(".snd-file").click());
+    row.querySelector(".snd-file").addEventListener("change",async e=>{
+      const f=e.target.files[0]; e.target.value="";
+      if(!f) return;
+      if(f.size>8*1024*1024){ alert("הקובץ גדול מדי (מקס' 8MB)."); return; }
+      if(!/\.ogg$/i.test(f.name) && !confirm("הקובץ לא נראה כמו OGG. מיינקראפט תומך רק ב-OGG Vorbis — קבצים אחרים לא יושמעו. להעלות בכל זאת?")) return;
+      await DB.put(`snd:${p.id}:${r.id}`, await f.arrayBuffer());
+      r.hasAudio=true; r.audioName=f.name; save(); renderSoundSection(p);
+    });
+    row.querySelector(".snd-del").addEventListener("click",async()=>{
+      if(r.hasAudio) await DB.del(`snd:${p.id}:${r.id}`).catch(()=>{});
+      p.sounds.rules = p.sounds.rules.filter(x=>x!==r); save(); renderSoundSection(p);
+    });
+  });
+  card.querySelector("#soundAddBtn").addEventListener("click",()=>{
+    p.sounds.rules.push({id:uid(), event:"", hasAudio:false}); save(); renderSoundSection(p);
+  });
+}
+
+// ============================================================
+// חסימה/נעילה: לפריט/בלוק/סאונד ספציפי — תמיד וניל, או תמיד ממקור נבחר,
+// בלי קשר לסדר העדיפות הרגיל. רץ אחרון ב-buildMergedPack, אחרי הכל (כולל הכללים המותאמים למעלה),
+// כי זו הכרעה מפורשת ומכוונת של המשתמש שאמורה לגבור על הכל.
+// ============================================================
+function lockCandidatePaths(kind, ns, path){
+  if(kind==="item") return [
+    `assets/${ns}/textures/item/${path}.png`,
+    `assets/${ns}/models/item/${path}.json`,
+    `assets/${ns}/items/${path}.json`,
+  ];
+  if(kind==="block") return [
+    `assets/${ns}/textures/block/${path}.png`,
+    `assets/${ns}/models/block/${path}.json`,
+    `assets/${ns}/blockstates/${path}.json`,
+    `assets/${ns}/models/item/${path}.json`,
+  ];
+  return [];
+}
+
+async function applyLocks(p, out){
+  const rules = (p.locks && p.locks.rules) || [];
+  const report = [];
+  for(const r of rules){
+    if(!r.assetId || !r.mode || !r.kind) continue;
+    const it = parseNsId(r.assetId); if(!it.path) continue;
+    if(r.kind==="sound"){
+      const jsonPath = `assets/${it.ns}/sounds.json`;
+      if(r.mode==="vanilla"){
+        const existing = out.file(jsonPath);
+        if(existing){
+          try{
+            const obj = JSON.parse(await existing.async("string"));
+            if(obj[it.path]){ delete obj[it.path]; out.file(jsonPath, JSON.stringify(obj,null,2)); }
+          }catch{}
+        }
+        report.push({...r, ok:true});
+      } else if(r.mode==="source" && r.sourceId){
+        const s = p.sources.find(x=>x.id===r.sourceId);
+        if(!s){ report.push({...r, ok:false, reason:"מקור לא נמצא"}); continue; }
+        try{
+          const idx = await getSourceIndex(s);
+          if(!idx.files.has(jsonPath)){ report.push({...r, ok:false, reason:"אין sounds.json במקור הנבחר"}); continue; }
+          const bytes = await getSourceFileBytes(s, jsonPath);
+          const srcObj = JSON.parse(new TextDecoder("utf-8").decode(bytes));
+          const def = srcObj[it.path];
+          if(!def){ report.push({...r, ok:false, reason:"האירוע לא מוגדר במקור הנבחר"}); continue; }
+          const soundList = Array.isArray(def.sounds) ? def.sounds : [];
+          for(const snd of soundList){
+            const name = typeof snd==="string" ? snd : (snd&&snd.name);
+            if(!name) continue;
+            const {ns:sns, path:sp} = resolveNsPath(normalizeResourceLocation(name));
+            const oggRel = `assets/${sns}/sounds/${sp}.ogg`;
+            if(idx.files.has(oggRel)){
+              const oggBytes = await getSourceFileBytes(s, oggRel);
+              if(oggBytes) out.file(oggRel, oggBytes);
+            }
+          }
+          let obj = {};
+          const existing = out.file(jsonPath);
+          if(existing){ try{ obj = JSON.parse(await existing.async("string")); }catch{} }
+          obj[it.path] = def;
+          out.file(jsonPath, JSON.stringify(obj,null,2));
+          report.push({...r, ok:true});
+        }catch(err){ report.push({...r, ok:false, reason:err.message}); }
+      }
+      continue;
+    }
+    const paths = lockCandidatePaths(r.kind, it.ns, it.path);
+    if(r.mode==="vanilla"){
+      for(const path of paths) out.remove(path);
+      report.push({...r, ok:true});
+    } else if(r.mode==="source" && r.sourceId){
+      const s = p.sources.find(x=>x.id===r.sourceId);
+      if(!s){ report.push({...r, ok:false, reason:"מקור לא נמצא"}); continue; }
+      try{
+        const idx = await getSourceIndex(s);
+        let any=false;
+        for(const path of paths){
+          if(idx.files.has(path)){
+            const bytes = await getSourceFileBytes(s, path);
+            if(bytes){ out.file(path, bytes); any=true; }
+          } else {
+            out.remove(path);
+          }
+        }
+        report.push({...r, ok:any, reason: any?null:"לא נמצאו קבצים במקור הנבחר"});
+      }catch(err){ report.push({...r, ok:false, reason:err.message}); }
+    }
+  }
+  return report;
+}
+
+const LOCK_KIND_LABEL = {item:"פריט", block:"בלוק", sound:"סאונד"};
+function renderLockSection(p){
+  const card = document.getElementById("lockCard");
+  if(!card) return;
+  if(!p.locks) p.locks = {rules:[]};
+  const rules = p.locks.rules;
+  const sourceOpts = p.sources.map((s,i)=>`<option value="${escapeAttr(s.id)}">#${i+1} ${escapeAttr(s.title||"מקור")}</option>`).join("");
+  card.innerHTML = `
+    <h3>🔒 חסימה / נעילה לפריט, בלוק או סאונד</h3>
+    <div class="hint" style="margin-top:-4px">
+      בלי קשר לסדר העדיפות של המקורות — אפשר לקבוע שפריט/בלוק/סאונד ספציפי <b>תמיד יישאר ברירת המחדל של מיינקראפט</b>,
+      או <b>תמיד יגיע ממקור מסוים</b> שבחרת. זה גובר על הכל, כולל טקסטורות מותאמות שהגדרת למעלה.
+    </div>
+    <div id="lockList"></div>
+    <div class="toolbar"><button id="lockAddBtn" class="ghost">➕ הוסף כלל</button></div>
+  `;
+  const list = card.querySelector("#lockList");
+  if(!rules.length){
+    list.innerHTML = `<div class="hint">אין כללים.</div>`;
+  }
+  rules.forEach(r=>{
+    if(!r.kind) r.kind="item";
+    if(!r.mode) r.mode="vanilla";
+    const dl = r.kind==="item" ? "itemsdl" : r.kind==="block" ? "blocksdl" : "soundsdl";
+    const row = document.createElement("div");
+    row.className = "src";
+    row.style.alignItems = "center";
+    row.style.flexWrap = "wrap";
+    row.innerHTML = `
+      <div style="flex:1; display:flex; flex-direction:column; gap:6px">
+        <div class="row" style="gap:8px">
+          <select class="lck-kind">
+            <option value="item" ${r.kind==="item"?"selected":""}>פריט</option>
+            <option value="block" ${r.kind==="block"?"selected":""}>בלוק</option>
+            <option value="sound" ${r.kind==="sound"?"selected":""}>סאונד</option>
+          </select>
+          <input type="text" class="lck-id" list="${dl}" placeholder="מזהה (למשל diamond_sword)" value="${escapeAttr(r.assetId||"")}" style="min-width:200px">
+          <button class="danger sm lck-del">🗑</button>
+        </div>
+        <div class="row" style="gap:8px">
+          <select class="lck-mode">
+            <option value="vanilla" ${r.mode==="vanilla"?"selected":""}>תמיד וניל (ברירת מחדל)</option>
+            <option value="source" ${r.mode==="source"?"selected":""}>תמיד ממקור מסוים</option>
+          </select>
+          <select class="lck-source" ${r.mode==="source"?"":"disabled"}>
+            <option value="">בחר מקור...</option>
+            ${sourceOpts}
+          </select>
+        </div>
+      </div>`;
+    list.appendChild(row);
+    const srcSel = row.querySelector(".lck-source");
+    if(r.sourceId) srcSel.value = r.sourceId;
+    row.querySelector(".lck-kind").addEventListener("change",e=>{ r.kind=e.target.value; save(); renderLockSection(p); });
+    row.querySelector(".lck-id").addEventListener("input",e=>{ r.assetId=e.target.value; save(); });
+    row.querySelector(".lck-mode").addEventListener("change",e=>{ r.mode=e.target.value; save(); renderLockSection(p); });
+    srcSel.addEventListener("change",e=>{ r.sourceId=e.target.value||null; save(); });
+    row.querySelector(".lck-del").addEventListener("click",()=>{
+      p.locks.rules = p.locks.rules.filter(x=>x!==r); save(); renderLockSection(p);
+    });
+  });
+  card.querySelector("#lockAddBtn").addEventListener("click",()=>{
+    p.locks.rules.push({id:uid(), kind:"item", assetId:"", mode:"vanilla", sourceId:null}); save(); renderLockSection(p);
+  });
+}
+
 async function buildMergedPack(){
   const p = curProj();
   const sources = p.sources.filter(s=>s.enabled);
@@ -1254,6 +1762,30 @@ async function buildMergedPack(){
         }
       }
     }catch(err){ logLine(`⚠️ יצירת טקסטורות פריט נכשלה: ${escapeHtml(err.message)}`,"warn"); }
+
+    // הזרקת טקסטורות בלוק מותאמות
+    try{
+      const {files:blockFiles, normals:blkNormals, sided:blkSided} = await buildBlockFiles(p);
+      if(blockFiles.length){
+        for(const f of blockFiles) out.file(f.path, f.data);
+        logLine(`🧱 נוספו טקסטורות בלוק מותאמות: ${blkNormals} אחידות, ${blkSided} לפי-צד`,"ok");
+      }
+    }catch(err){ logLine(`⚠️ יצירת טקסטורות בלוק נכשלה: ${escapeHtml(err.message)}`,"warn"); }
+
+    // הזרקת צלילים מותאמים
+    try{
+      const sndCount = await applySoundOverrides(p, out);
+      if(sndCount) logLine(`🔊 הוחלפו ${sndCount} אירועי סאונד בקבצים מותאמים אישית`,"ok");
+    }catch(err){ logLine(`⚠️ החלת צלילים מותאמים נכשלה: ${escapeHtml(err.message)}`,"warn"); }
+
+    // חסימה/נעילה — רץ אחרון, גובר על הכל (כולל הכללים המותאמים למעלה)
+    try{
+      const lockReport = await applyLocks(p, out);
+      const okLocks = lockReport.filter(x=>x.ok);
+      const failLocks = lockReport.filter(x=>!x.ok);
+      if(okLocks.length) logLine(`🔒 הוחלו ${okLocks.length} כללי חסימה/נעילה (פריט/בלוק/סאונד)`,"ok");
+      failLocks.forEach(r=>logLine(`⚠️ כלל חסימה על <b>${escapeHtml(r.assetId)}</b> נכשל: ${escapeHtml(r.reason||"שגיאה")}`,"warn"));
+    }catch(err){ logLine(`⚠️ החלת כללי חסימה/נעילה נכשלה: ${escapeHtml(err.message)}`,"warn"); }
 
     logLine(`<b>${claimed.size}</b> קבצים ייחודיים · <b>${conflicts.length}</b> התנגשויות נפתרו לפי עדיפות`,"ok");
     if(jsonOverlaps.length){
@@ -1512,6 +2044,39 @@ async function exportProject(p){
       }
       cit = {rules};
     }
+    // כללי טקסטורת בלוק + התמונות שלהם
+    let blocks = null;
+    if(p.blocks && p.blocks.rules && p.blocks.rules.length){
+      const rules = [];
+      for(const r of p.blocks.rules){
+        const rr = {id:r.id, block:r.block||"", mode:r.mode||"all", hasAll:!!r.hasAll, tex:{}};
+        for(const f of ["all",...BLOCK_FACES]){
+          try{ const b=await DB.get(`blk:${p.id}:${r.id}:${f}`); if(b) rr.tex[f]=bytesToBase64(b); }catch{}
+        }
+        rules.push(rr);
+      }
+      blocks = {rules};
+    }
+    // כללי סאונד + קובצי האודיו שלהם
+    let sounds = null;
+    if(p.sounds && p.sounds.rules && p.sounds.rules.length){
+      const rules = [];
+      for(const r of p.sounds.rules){
+        const rr = {id:r.id, event:r.event||"", hasAudio:!!r.hasAudio, audioName:r.audioName||""};
+        if(r.hasAudio){ try{ const b=await DB.get(`snd:${p.id}:${r.id}`); if(b) rr.audioBase64=bytesToBase64(b); else rr.hasAudio=false; }catch{ rr.hasAudio=false; } }
+        rules.push(rr);
+      }
+      sounds = {rules};
+    }
+    // כללי חסימה/נעילה (sourceId מתורגם לאינדקס המקור כדי לשרוד ייבוא למחשב אחר)
+    let locks = null;
+    if(p.locks && p.locks.rules && p.locks.rules.length){
+      const rules = p.locks.rules.map(r=>({
+        id:r.id, kind:r.kind||"item", assetId:r.assetId||"", mode:r.mode||"vanilla",
+        sourceIdx: r.sourceId ? p.sources.findIndex(s=>s.id===r.sourceId) : -1,
+      }));
+      locks = {rules};
+    }
     const payload = {
       schema: EXPORT_SCHEMA,
       exportedAt: new Date().toISOString(),
@@ -1519,7 +2084,7 @@ async function exportProject(p){
         name: p.name, targetVersion: p.targetVersion, packFormat: p.packFormat,
         description: p.description||"", sources,
         iconName: p.iconName||null, iconBase64,
-        cit,
+        cit, blocks, sounds, locks,
       }
     };
     const json = JSON.stringify(payload);
@@ -1568,6 +2133,31 @@ async function importProjectFromFile(file){
       const nr = {id:uid(), item:r.item||"", name:r.name||"", hasTex:false};
       if(r.texBase64){ try{ await DB.put("cit:"+newP.id+":"+nr.id, base64ToBytes(r.texBase64).buffer); nr.hasTex=true; }catch{} }
       newP.cit.rules.push(nr);
+    }
+  }
+  if(src.blocks && Array.isArray(src.blocks.rules)){
+    newP.blocks = {rules:[]};
+    for(const r of src.blocks.rules){
+      const nr = {id:uid(), block:r.block||"", mode:r.mode||"all", hasAll:false};
+      for(const [face,b64] of Object.entries(r.tex||{})){
+        try{ await DB.put(`blk:${newP.id}:${nr.id}:${face}`, base64ToBytes(b64).buffer); if(face==="all") nr.hasAll=true; }catch{}
+      }
+      newP.blocks.rules.push(nr);
+    }
+  }
+  if(src.sounds && Array.isArray(src.sounds.rules)){
+    newP.sounds = {rules:[]};
+    for(const r of src.sounds.rules){
+      const nr = {id:uid(), event:r.event||"", hasAudio:false, audioName:r.audioName||""};
+      if(r.audioBase64){ try{ await DB.put(`snd:${newP.id}:${nr.id}`, base64ToBytes(r.audioBase64).buffer); nr.hasAudio=true; }catch{} }
+      newP.sounds.rules.push(nr);
+    }
+  }
+  if(src.locks && Array.isArray(src.locks.rules)){
+    newP.locks = {rules:[]};
+    for(const r of src.locks.rules){
+      const sourceId = (r.sourceIdx>=0 && newP.sources[r.sourceIdx]) ? newP.sources[r.sourceIdx].id : null;
+      newP.locks.rules.push({id:uid(), kind:r.kind||"item", assetId:r.assetId||"", mode:r.mode||"vanilla", sourceId});
     }
   }
   state.unshift(newP); selectedId=newP.id; localStorage.setItem(LS_SEL,newP.id);
