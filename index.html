@@ -419,35 +419,46 @@ const DB = (()=>{
   };
 })();
 
-// ---------- אחסון פרויקטים (localStorage) ----------
-const LS_KEY = "rpm.projects.v1";
-const LS_SEL = "rpm.selected.v1";
-let state = load();
-let selectedId = localStorage.getItem(LS_SEL) || (state[0] && state[0].id) || null;
+// ---------- אחסון פרויקטים (IndexedDB) ----------
+// היה ב-localStorage בעבר, אבל זו מכסה קטנה (כמה MB) שמשותפת לכל אתר שמתארח תחת אותו מקור
+// (למשל כל הפרויקטים של giamat13.github.io ביחד) — כלי אחר שמתארח שם יכול למלא אותה ולתקוע
+// את השמירה כאן בלי שום קשר לגודל הנתונים של הכלי הזה. IndexedDB מקבל מכסה נפרדת וגדולה
+// בהרבה (בד"כ אחוז מהדיסק הפנוי, עשרות עד מאות MB לפחות), ולא חולקים אותה מ-localStorage.
+const LS_KEY_LEGACY = "rpm.projects.v1"; // רק לצורך הגירה חד-פעמית מגרסה ישנה
+const LS_SEL_LEGACY = "rpm.selected.v1";
+const LS_SNAP_LEGACY = "rpm.snapshots.v1";
+let state = [];
+let selectedId = null;
+let _stateLoaded = false;
 
-function load(){
-  try{ return JSON.parse(localStorage.getItem(LS_KEY)) || []; }catch{ return []; }
+async function loadState(){
+  try{
+    const meta = await DB.get("meta:state");
+    if(meta){
+      state = meta.projects || [];
+      selectedId = meta.selectedId || (state[0] && state[0].id) || null;
+      _stateLoaded = true;
+      return;
+    }
+  }catch{}
+  // אין עדיין רשומה ב-IndexedDB — הגירה חד-פעמית מ-localStorage (גרסאות קודמות של הכלי)
+  try{
+    const legacy = JSON.parse(localStorage.getItem(LS_KEY_LEGACY));
+    if(Array.isArray(legacy) && legacy.length){
+      state = legacy;
+      selectedId = localStorage.getItem(LS_SEL_LEGACY) || (state[0] && state[0].id) || null;
+      await DB.put("meta:state", {projects: state, selectedId});
+      localStorage.removeItem(LS_KEY_LEGACY);
+      localStorage.removeItem(LS_SEL_LEGACY);
+      localStorage.removeItem(LS_SNAP_LEGACY);
+    }
+  }catch{}
+  _stateLoaded = true;
 }
 function save(){
-  const json = JSON.stringify(state);
-  try{
-    localStorage.setItem(LS_KEY, json);
-  }catch(err){
-    // מכסת localStorage מלאה — קודם משחררים מקום ע"י מחיקת הגיבויים האוטומטיים
-    // (rpm.snapshots.v1, עד 20 עותקים מלאים של state), שהם פחות קריטיים מהנתונים החיים, ומנסים שוב.
-    try{
-      localStorage.removeItem(LS_SNAP);
-      localStorage.setItem(LS_KEY, json);
-    }catch(err2){
-      let usageLine = "";
-      try{
-        const {total, ours} = localStorageUsageReport();
-        usageLine = `\n\nמידע לאבחון: הנתונים שניסינו לשמור: ${(json.length/1024).toFixed(1)} KB. סה"כ שימוש ב-localStorage במקור ${location.hostname}: ${(total/1024).toFixed(1)} KB (מתוכם ${(ours/1024).toFixed(1)} KB שייכים לכלי הזה). אם total גדול בהרבה מ-ours, חלק ניכר מהמכסה תפוס ע"י אתר/פרויקט אחר שמתארח תחת אותו מקור.`;
-      }catch{}
-      alert("שגיאת אחסון: אין מספיק מקום פנוי בדפדפן לשמור את הפרויקטים (localStorage מלא), גם אחרי מחיקת הגיבויים האוטומטיים.\nמומלץ למחוק פרויקטים ישנים שאינם בשימוש (🗑️ ליד כל פרויקט ברשימה)."+usageLine);
-      throw err2;
-    }
-  }
+  DB.put("meta:state", {projects: state, selectedId}).catch(err=>{
+    alert("שגיאת שמירה: לא הצלחנו לשמור את הפרויקטים (IndexedDB).\n"+((err&&err.message)||err));
+  });
   updateBadge();
 }
 function updateBadge(){
@@ -508,7 +519,7 @@ function renderProjects(){
     d.innerHTML = `<input class="nm" value="${escapeAttr(p.name)}" title="שם הפרויקט">
       <span class="ct">${p.sources.length}</span>
       <button class="ghost sm projDelBtn" title="מחק פרויקט">🗑️</button>`;
-    d.onclick = (e)=>{ if(e.target.closest(".nm")||e.target.closest(".projDelBtn")) return; selectedId=p.id; localStorage.setItem(LS_SEL,p.id); renderAll(); };
+    d.onclick = (e)=>{ if(e.target.closest(".nm")||e.target.closest(".projDelBtn")) return; selectedId=p.id; save(); renderAll(); };
     const nmEl = d.querySelector(".nm");
     nmEl.addEventListener("click", e=>e.stopPropagation());
     nmEl.addEventListener("change", e=>{
@@ -2344,7 +2355,7 @@ async function importProjectFromFile(file){
     ...((newP.blocks&&newP.blocks.rules)||[]).map(r=>r.seq||0),
     ...((newP.sounds&&newP.sounds.rules)||[]).map(r=>r.seq||0),
   );
-  state.unshift(newP); selectedId=newP.id; localStorage.setItem(LS_SEL,newP.id);
+  state.unshift(newP); selectedId=newP.id;
   save(); renderAll();
   alert(`הפרויקט "${newP.name}" יובא בהצלחה עם ${newP.sources.length} מקורות, כולל הסדר, האייקון וקובצי ה־ZIP.`);
 }
@@ -2406,7 +2417,7 @@ async function duplicateProject(p){
         if(r.sourceId) r.sourceId = srcIdMap.get(r.sourceId) || null;
       }
     }
-    state.unshift(newP); selectedId = newP.id; localStorage.setItem(LS_SEL, newP.id);
+    state.unshift(newP); selectedId = newP.id;
     save(); renderAll();
   }catch(err){
     alert("שכפול הפרויקט נכשל: "+err.message);
@@ -2428,7 +2439,6 @@ async function deleteProject(p){
   state = state.filter(x=>x.id!==p.id);
   if(selectedId===p.id){
     selectedId = (state[0] && state[0].id) || null;
-    localStorage.setItem(LS_SEL, selectedId||"");
   }
   save(); renderAll();
 }
@@ -2482,52 +2492,46 @@ async function refreshIconPreview(p){
 }
 
 /* ============================================================
-   גיבוי אוטומטי (snapshots) — מגן מפני מחיקה/שינוי בטעות ב-localStorage.
-   שומר רק את state (הגדרות הפרויקטים), לא בייטים מ-IndexedDB (מכסת localStorage מוגבלת).
+   גיבוי אוטומטי (snapshots) — מגן מפני מחיקה/שינוי בטעות.
+   שומר רק את state (הגדרות הפרויקטים), לא בייטים אחרים — ב-IndexedDB, כמו שאר האחסון של הכלי.
    ============================================================ */
-const LS_SNAP = "rpm.snapshots.v1";
 const SNAP_MAX = 20;
 const SNAP_INTERVAL_MS = 60000;
 let _lastSnapshotJson = null;
 
-function loadSnapshots(){
-  try{ return JSON.parse(localStorage.getItem(LS_SNAP)) || []; }catch{ return []; }
+async function loadSnapshots(){
+  try{ return (await DB.get("meta:snapshots")) || []; }catch{ return []; }
 }
-function saveSnapshots(snaps){
-  while(snaps.length){
-    try{ localStorage.setItem(LS_SNAP, JSON.stringify(snaps)); return; }
-    catch{ snaps.shift(); } // מכסת אחסון חרגה — מוריד את הגיבוי הישן ביותר ומנסה שוב
-  }
-  try{ localStorage.removeItem(LS_SNAP); }catch{}
+async function saveSnapshots(snaps){
+  try{ await DB.put("meta:snapshots", snaps); }catch{}
 }
-function takeSnapshotIfChanged(){
+async function takeSnapshotIfChanged(){
   const json = JSON.stringify(state);
   if(json === _lastSnapshotJson) return;
   _lastSnapshotJson = json;
   if(!state.length) return; // אין מה לגבות
-  const snaps = loadSnapshots();
-  snaps.push({at: new Date().toISOString(), data: json});
+  const snaps = await loadSnapshots();
+  snaps.push({at: new Date().toISOString(), data: state});
   while(snaps.length > SNAP_MAX) snaps.shift();
-  saveSnapshots(snaps);
+  await saveSnapshots(snaps);
 }
 setInterval(takeSnapshotIfChanged, SNAP_INTERVAL_MS);
 
-function openSnapshotsDialog(){
-  renderSnapshotsList();
-  renderStorageInfo();
+async function openSnapshotsDialog(){
+  await renderSnapshotsList();
+  await renderStorageInfo();
   document.getElementById("snapDlg").showModal();
 }
-function renderSnapshotsList(){
+async function renderSnapshotsList(){
   const el = document.getElementById("snapList");
-  const snaps = loadSnapshots().slice().reverse(); // החדש ביותר קודם
+  const snaps = (await loadSnapshots()).slice().reverse(); // החדש ביותר קודם
   if(!snaps.length){
     el.innerHTML = `<div class="hint">אין עדיין גיבויים. גיבוי ראשון נוצר תוך דקה מהשינוי הראשון בפרויקט.</div>`;
     return;
   }
   el.innerHTML = "";
   snaps.forEach(snap=>{
-    let nProjects = 0;
-    try{ nProjects = (JSON.parse(snap.data)||[]).length; }catch{}
+    const nProjects = Array.isArray(snap.data) ? snap.data.length : 0;
     const d = document.createElement("div");
     d.className = "ver";
     const dt = new Date(snap.at);
@@ -2537,40 +2541,33 @@ function renderSnapshotsList(){
     el.appendChild(d);
   });
 }
-// מודד כמה בייטים בערך תופס כל מפתח ב-localStorage של המקור הזה (giamat13.github.io כולו,
-// כולל פרויקטים אחרים שמתארחים תחת אותו מקור — הם חולקים אותה מכסת אחסון).
-function localStorageUsageReport(){
-  let total = 0, ours = 0;
-  for(let i=0;i<localStorage.length;i++){
-    const k = localStorage.key(i);
-    const v = localStorage.getItem(k) || "";
-    const bytes = (k.length + v.length) * 2; // הערכה גסה, UTF-16
-    total += bytes;
-    if(k===LS_KEY || k===LS_SNAP || k===LS_SEL) ours += bytes;
-  }
-  return {total, ours};
-}
-function renderStorageInfo(){
+// מציג כמה מהמכסה של הדפדפן תפוסה (IndexedDB, שאינה חולקת מכסה עם localStorage), לצורך אבחון.
+async function renderStorageInfo(){
   const el = document.getElementById("storageInfo");
   if(!el) return;
-  const {total, ours} = localStorageUsageReport();
-  const kb = n => (n/1024).toFixed(1);
-  el.innerHTML = `אחסון (localStorage) במקור <b>${escapeHtml(location.hostname)}</b> — מכסה משותפת לכל האתרים שמתארחים תחת אותו מקור (למשל אתרי GitHub Pages אחרים שלך):<br>
-    סה"כ בשימוש: ${kb(total)} KB, מתוכם ${kb(ours)} KB שייכים לכלי הזה (פרויקטים + גיבויים).`;
+  if(!(navigator.storage && navigator.storage.estimate)){
+    el.innerHTML = "";
+    return;
+  }
+  try{
+    const {usage, quota} = await navigator.storage.estimate();
+    const mb = n => (n/1024/1024).toFixed(1);
+    el.innerHTML = `אחסון (IndexedDB) במקור <b>${escapeHtml(location.hostname)}</b> — מכסה משותפת לכל האתרים שמתארחים תחת אותו מקור, אבל גדולה בהרבה מ-localStorage:<br>
+      בשימוש: ${mb(usage)} MB מתוך ${mb(quota)} MB זמינים.`;
+  }catch{ el.innerHTML = ""; }
 }
-document.getElementById("clearSnapsBtn").addEventListener("click", ()=>{
+document.getElementById("clearSnapsBtn").addEventListener("click", async ()=>{
   if(!confirm("למחוק את כל הגיבויים האוטומטיים? הפעולה לא משפיעה על הפרויקטים הנוכחיים, רק על נקודות השחזור.")) return;
-  localStorage.removeItem(LS_SNAP);
-  renderSnapshotsList();
-  renderStorageInfo();
+  await saveSnapshots([]);
+  await renderSnapshotsList();
+  await renderStorageInfo();
 });
 function restoreSnapshot(snap){
   const dt = new Date(snap.at).toLocaleString("he-IL");
   if(!confirm(`לשחזר את הגיבוי מ-${dt}?\nזה יחליף את כל הפרויקטים הנוכחיים בדפדפן הזה (הגדרות בלבד — קבצי ZIP/תמונות/אודיו שהועלו לא נמחקים ולא משוחזרים, ה-IndexedDB לא נוגע).`)) return;
   try{
-    state = JSON.parse(snap.data);
+    state = snap.data;
     selectedId = (state[0] && state[0].id) || null;
-    localStorage.setItem(LS_SEL, selectedId||"");
     _lastSnapshotJson = null; // מכריח לקחת גיבוי חדש בפעם הבאה שיהיה שינוי, כדי לשמור את נקודת השחזור
     save(); renderAll();
     document.getElementById("snapDlg").close();
@@ -2585,14 +2582,17 @@ document.getElementById("newProjBtn").addEventListener("click",()=>{
     id:uid(), name:"חבילה חדשה", targetVersion:defVer, packFormat:pfFor(defVer),
     description:"", sources:[],
   };
-  state.unshift(p); selectedId=p.id; localStorage.setItem(LS_SEL,p.id);
+  state.unshift(p); selectedId=p.id;
   save(); renderAll();
   setTimeout(()=>{ const el=document.getElementById("pName"); if(el){el.focus();el.select();} },50);
 });
 
 // ---------- אתחול ----------
-_lastSnapshotJson = JSON.stringify(state); // בסיס לגיבוי — הגיבוי הראשון ייווצר אחרי השינוי הראשון
-renderAll();
+(async ()=>{
+  await loadState();
+  _lastSnapshotJson = JSON.stringify(state); // בסיס לגיבוי — הגיבוי הראשון ייווצר אחרי השינוי הראשון
+  renderAll();
+})();
 </script>
 </body>
 </html>
