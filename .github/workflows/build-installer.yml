@@ -22,13 +22,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install PyInstaller
-        run: python -m pip install --upgrade pip pyinstaller
+      - name: Install PyInstaller + Pillow
+        run: python -m pip install --upgrade pip pyinstaller pillow
+
+      - name: Generate installer icon
+        run: python installer/build_installer_icon.py
 
       - name: Build stub EXE
         run: >
           pyinstaller --onefile --windowed
           --name "MC-Pack-Installer-stub"
+          --icon installer/installer_icon.ico
           installer/mc_pack_installer.py
 
       - name: Smoke test (headless detection + no embedded payload)

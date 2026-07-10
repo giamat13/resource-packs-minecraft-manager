@@ -45,10 +45,13 @@ python installer/mc_pack_installer.py
 
 **מקומית:**
 ```
-pip install pyinstaller
-pyinstaller --onefile --windowed --name "MC-Pack-Installer-stub" installer/mc_pack_installer.py
+pip install pyinstaller pillow
+python installer/build_installer_icon.py
+pyinstaller --onefile --windowed --name "MC-Pack-Installer-stub" --icon installer/installer_icon.ico installer/mc_pack_installer.py
 ```
 העתק את `dist/MC-Pack-Installer-stub.exe` אל `installer/MC-Pack-Installer-stub.exe` ובצע commit.
+
+**חשוב לגבי אייקון:** ה-stub נבנה עם משבצת אייקון יחידה 256×256, 32-bit, לא-דחוסה (נוצרת ע"י [`build_installer_icon.py`](build_installer_icon.py)). זה מה שמאפשר לכלי בדפדפן להחליף את אייקון ה-EXE באייקון החבילה במקום (in-place) בלי לשבור את ה-PE. אל תבנה עם `.ico` רב-גדלים או PNG-דחוס — זה ישבור את החלפת האייקון בדפדפן.
 
 **דרך GitHub (בלי Python מקומי):**
 Actions → **Build installer stub** → **Run workflow** → הורד את ה-artifact → החלף בו את הקובץ ב-`installer/` ובצע commit.

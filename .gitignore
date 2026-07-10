@@ -17,6 +17,10 @@ dist/
 __pycache__/
 *.pyc
 
+# Generated installer icon (recreated by installer/build_installer_icon.py)
+installer/installer_icon.ico
+installer/installer_icon_preview.png
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db
