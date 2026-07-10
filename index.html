@@ -117,6 +117,13 @@
   .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--muted);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px}
   @keyframes spin{to{transform:rotate(360deg)}}
   a{color:var(--accent)}
+  code{background:var(--chip); padding:1px 6px; border-radius:5px; font-family:ui-monospace,Consolas,monospace; font-size:12px}
+  table.res{width:100%; border-collapse:collapse; font-size:13px}
+  table.res th{text-align:right; padding:6px 8px; border-bottom:1px solid var(--line); color:var(--muted); font-weight:600; font-size:11px}
+  table.res td{padding:6px 8px; border-bottom:1px solid var(--line)}
+  table.res td.path{font-family:ui-monospace,Consolas,monospace; font-size:11px; color:var(--muted); direction:ltr; text-align:right}
+  .chip.link{cursor:pointer; text-decoration:underline dotted}
+  .chip.link:hover{color:var(--accent)}
 </style>
 </head>
 <body>
@@ -407,6 +414,16 @@ function renderMain(){
     </div>
 
     <div class="card">
+      <h3>🔍 מי אחראי על הפריט?</h3>
+      <div class="hint" style="margin-top:-4px">חפש שם פריט/בלוק (למשל <code>diamond_sword</code> או <code>mymod:ruby_sword</code>) ותראה איזה מקור קובע את הטקסטורה/מודל שלו לפי סדר העדיפות הנוכחי — או אם זה נשאר ברירת המחדל של מיינקראפט.</div>
+      <div class="toolbar">
+        <input type="text" id="itemQuery" placeholder="diamond_sword">
+        <button id="itemSearchBtn">חפש</button>
+      </div>
+      <div id="itemSearchResults" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
       <h3>🔨 מיזוג ובנייה</h3>
       <div class="toolbar">
         <button id="buildBtn" class="ok">בנה חבילה ממוזגת (ZIP)</button>
@@ -425,6 +442,10 @@ function renderMain(){
   bind("addSrcBtn","click",openAddDialog);
   bind("buildBtn","click",buildProject);
   bind("exportProjBtn","click",()=>exportProject(p));
+  bind("itemSearchBtn","click",()=>searchItem(document.getElementById("itemQuery").value));
+  document.getElementById("itemQuery").addEventListener("keydown",e=>{
+    if(e.key==="Enter") searchItem(e.target.value);
+  });
   renderSources();
 }
 
@@ -743,6 +764,138 @@ function walkModelRefs(node, refs){
 function resolveNsPath(ref){
   const idx = ref.indexOf(":");
   return idx<0 ? {ns:"minecraft", path:ref} : {ns:ref.slice(0,idx), path:ref.slice(idx+1)};
+}
+
+// ============================================================
+// חיפוש: "מי אחראי על הפריט הזה?" — סורק את כל המקורות (בסדר עדיפות)
+// ============================================================
+const KIND_FOLDER = {
+  "items":"item_model_def", "models/item":"item_model", "models/block":"block_model",
+  "blockstates":"blockstate", "textures/item":"item_texture", "textures/block":"block_texture",
+};
+const KIND_LABEL = {
+  item_model_def:"הגדרת פריט (1.21.4+)", item_model:"מודל פריט", block_model:"מודל בלוק",
+  blockstate:"בלוקסטייט", item_texture:"טקסטורת פריט", block_texture:"טקסטורת בלוק",
+};
+const ASSET_RE = /^assets\/([^/]+)\/(items|models\/item|models\/block|blockstates|textures\/item|textures\/block)\/(.+)\.(json|png)$/;
+const zipIndexCache = new Map(); // source.id -> {files:Set<string lowercase rel path>, byBasename:Map<string,[{ns,kind,path}]>}
+
+async function getSourceIndex(s){
+  if(zipIndexCache.has(s.id)) return zipIndexCache.get(s.id);
+  const bytes = await getSourceBytes(s);
+  const zip = await JSZip.loadAsync(bytes);
+  const prefix = findRootPrefix(zip);
+  const files = new Set();
+  const byBasename = new Map();
+  for(const pth of Object.keys(zip.files)){
+    if(zip.files[pth].dir || !pth.startsWith(prefix)) continue;
+    const rel = pth.slice(prefix.length).toLowerCase();
+    if(!rel) continue;
+    files.add(rel);
+    const m = rel.match(ASSET_RE);
+    if(m){
+      const ns=m[1], kind=KIND_FOLDER[m[2]], path=m[3];
+      const basename = path.split("/").pop();
+      if(!byBasename.has(basename)) byBasename.set(basename,[]);
+      byBasename.get(basename).push({ns,kind,path});
+    }
+  }
+  const idx = {files, byBasename};
+  zipIndexCache.set(s.id, idx);
+  return idx;
+}
+
+async function searchItem(rawQuery){
+  const el = document.getElementById("itemSearchResults");
+  let q = (rawQuery||"").trim().toLowerCase().replace(/\s+/g,"_");
+  if(!q){ el.innerHTML = `<span class="hint">הקלד שם פריט לחיפוש.</span>`; return; }
+  el.innerHTML = `<span class="hint"><span class="spinner"></span> טוען מקורות ובודק...</span>`;
+
+  let targetNs="minecraft", targetPath=q;
+  const ci = q.indexOf(":");
+  if(ci>=0){ targetNs=q.slice(0,ci)||"minecraft"; targetPath=q.slice(ci+1); }
+  targetPath = targetPath.replace(/\.(json|png)$/,"");
+  if(!targetPath){ el.innerHTML = `<span class="hint">שם פריט לא תקין.</span>`; return; }
+
+  const p = curProj();
+  const enabledSources = p.sources.filter(s=>s.enabled);
+  const loadedIdx = new Map();
+  const skipped = [];
+  for(const s of enabledSources){
+    try{ loadedIdx.set(s.id, await getSourceIndex(s)); }
+    catch(err){ skipped.push({title:s.title, reason:err.message}); }
+  }
+
+  const rows = [];
+  for(const [kind,label] of Object.entries(KIND_LABEL)){
+    const ext = kind.endsWith("texture") ? "png" : "json";
+    const folder = Object.keys(KIND_FOLDER).find(f=>KIND_FOLDER[f]===kind);
+    const full = `assets/${targetNs}/${folder}/${targetPath}.${ext}`;
+    let winner=null;
+    for(const s of enabledSources){
+      const idx = loadedIdx.get(s.id); if(!idx) continue;
+      if(idx.files.has(full)){ winner=s; break; }
+    }
+    rows.push({kind,label,full,winner});
+  }
+
+  const lastSeg = targetPath.split("/").pop();
+  const suggestions = [];
+  for(const s of enabledSources){
+    const idx = loadedIdx.get(s.id); if(!idx) continue;
+    const arr = idx.byBasename.get(lastSeg);
+    if(!arr) continue;
+    for(const rec of arr){
+      if(rec.ns===targetNs && rec.path===targetPath) continue; // כבר נספר כהתאמה מדויקת
+      suggestions.push({...rec, sourceTitle:s.title});
+    }
+  }
+
+  renderItemSearchResults({q, targetNs, targetPath, rows, suggestions, skipped, enabledCount:enabledSources.length, p});
+}
+
+function renderItemSearchResults({q, targetNs, targetPath, rows, suggestions, skipped, enabledCount, p}){
+  const el = document.getElementById("itemSearchResults");
+  if(!enabledCount){ el.innerHTML = `<span class="hint">אין מקורות פעילים בפרויקט.</span>`; return; }
+  const anyWinner = rows.some(r=>r.winner);
+  let html = `<div class="hint" style="margin-bottom:8px">מחפש: <code>${escapeHtml(targetNs)}:${escapeHtml(targetPath)}</code></div>`;
+  html += `<table class="res"><thead><tr><th>סוג</th><th>אחראי</th><th>נתיב</th></tr></thead><tbody>`;
+  for(const r of rows){
+    const badge = r.winner
+      ? `<span class="chip m">#${p.sources.indexOf(r.winner)+1} ${escapeHtml(r.winner.title)}</span>`
+      : `<span class="chip">וניל — ברירת מחדל של מיינקראפט</span>`;
+    html += `<tr><td>${escapeHtml(r.label)}</td><td>${badge}</td><td class="path">${escapeHtml(r.full)}</td></tr>`;
+  }
+  html += `</tbody></table>`;
+  if(!anyWinner){
+    html += `<div class="hint" style="margin-top:8px">אף אחד מהמקורות שלך לא דורס את <code>${escapeHtml(targetNs)}:${escapeHtml(targetPath)}</code> — הוא יופיע בטקסטורה/מודל הרגילים של מיינקראפט בחבילה הממוזגת.</div>`;
+  }
+  if(suggestions.length){
+    const uniq = [];
+    const seen = new Set();
+    for(const s of suggestions){
+      const key = s.ns+":"+s.path+":"+s.kind;
+      if(seen.has(key)) continue; seen.add(key); uniq.push(s);
+    }
+    html += `<div class="hint" style="margin-top:12px">🔎 נמצאו גם התאמות בשם דומה ב-namespaces אחרים (אולי זה מה שהתכוונת אליו):</div>`;
+    html += `<div class="row" style="margin-top:6px">`;
+    uniq.slice(0,12).forEach(s=>{
+      const full = `${s.ns}:${s.path}`;
+      html += `<span class="chip link" data-goto="${escapeAttr(full)}" title="${escapeAttr(KIND_LABEL[s.kind])} · ${escapeAttr(s.sourceTitle)}">${escapeHtml(full)}</span>`;
+    });
+    html += `</div>`;
+  }
+  if(skipped.length){
+    html += `<div class="hint" style="margin-top:12px; color:var(--warn)">⚠️ לא ניתן היה לבדוק ${skipped.length} מקור/ות (חסר ZIP או שגיאת הורדה): ${skipped.map(s=>escapeHtml(s.title)).join(", ")}</div>`;
+  }
+  el.innerHTML = html;
+  el.querySelectorAll(".chip.link").forEach(chip=>{
+    chip.addEventListener("click",()=>{
+      const v = chip.dataset.goto;
+      document.getElementById("itemQuery").value = v;
+      searchItem(v);
+    });
+  });
 }
 
 async function buildProject(){
