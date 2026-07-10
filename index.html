@@ -131,6 +131,8 @@
   <aside>
     <div class="head">
       <button id="newProjBtn" style="flex:1">➕ פרויקט חדש</button>
+      <button id="importProjBtn" class="ghost" title="ייבוא פרויקט מקובץ JSON">📥</button>
+      <input type="file" id="importProjFile" accept=".json" style="display:none">
     </div>
     <div id="projectList"></div>
   </aside>
@@ -389,6 +391,11 @@ function renderMain(){
       <label class="fld" style="margin-top:10px">תיאור (נכנס ל־pack.mcmeta)
         <input type="text" id="pDesc" value="${escapeAttr(p.description||"")}" style="min-width:340px">
       </label>
+      <div class="toolbar">
+        <button id="exportProjBtn" class="ghost">⬇️ ייצוא פרויקט (JSON)</button>
+        <span class="hint" style="margin:0">מעבר למחשב אחר: ייצוא כאן → ייבוא 📥 בסרגל הצד. כולל את כל קובצי ה־ZIP שהעלית ואת הסדר.</span>
+      </div>
+      <div class="hint" id="exportStatus"></div>
     </div>
 
     <div class="card">
@@ -417,6 +424,7 @@ function renderMain(){
   bind("pDesc","input",e=>{ p.description=e.target.value; save(); });
   bind("addSrcBtn","click",openAddDialog);
   bind("buildBtn","click",buildProject);
+  bind("exportProjBtn","click",()=>exportProject(p));
   renderSources();
 }
 
@@ -778,6 +786,101 @@ async function buildProject(){
     btn.disabled=false;
   }
 }
+
+/* ============================================================
+   ייצוא / ייבוא פרויקט (JSON נייד — כולל בייטים של ZIPים)
+   ============================================================ */
+const EXPORT_SCHEMA = "rpm-project-export/1";
+
+// ArrayBuffer/Uint8Array <-> base64, בפיסות כדי לא לפוצץ את מחסנית הקריאות בקבצים גדולים
+function bytesToBase64(bytes){
+  bytes = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const CHUNK = 0x8000;
+  let binary = "";
+  for(let i=0;i<bytes.length;i+=CHUNK){
+    binary += String.fromCharCode.apply(null, bytes.subarray(i,i+CHUNK));
+  }
+  return btoa(binary);
+}
+function base64ToBytes(b64){
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function exportProject(p){
+  const statusEl = document.getElementById("exportStatus");
+  const setStatus = (html)=>{ if(statusEl) statusEl.innerHTML = html; };
+  setStatus(`<span class="spinner"></span> אוסף קבצים...`);
+  try{
+    const sources = [];
+    for(const s of p.sources){
+      const copy = {...s};
+      if(copy.hasBlob){
+        const buf = await DB.get(copy.id);
+        if(buf) copy.blobBase64 = bytesToBase64(buf);
+        else { copy.hasBlob = false; }
+      }
+      sources.push(copy);
+    }
+    const payload = {
+      schema: EXPORT_SCHEMA,
+      exportedAt: new Date().toISOString(),
+      project: {
+        name: p.name, targetVersion: p.targetVersion, packFormat: p.packFormat,
+        description: p.description||"", sources,
+      }
+    };
+    const json = JSON.stringify(payload);
+    const blob = new Blob([json], {type:"application/json"});
+    const fname = (p.name||"project").replace(/[^\w֐-׿ .-]/g,"_")+".rpmproject.json";
+    downloadBlob(blob,fname);
+    setStatus(`<span style="color:var(--accent2)">✅ יוצא: ${escapeHtml(fname)} (${(blob.size/1024/1024).toFixed(2)} MB) — כולל ${sources.filter(s=>s.blobBase64).length} קבצי ZIP מוטמעים</span>`);
+  }catch(err){
+    setStatus(`<span style="color:var(--danger)">שגיאת ייצוא: ${escapeHtml(err.message)}</span>`);
+  }
+}
+
+async function importProjectFromFile(file){
+  let payload;
+  try{ payload = JSON.parse(await file.text()); }
+  catch{ alert("קובץ לא תקין — לא JSON."); return; }
+  if(!payload || payload.schema!==EXPORT_SCHEMA || !payload.project){
+    alert("זה לא קובץ ייצוא פרויקט תקין של הכלי הזה."); return;
+  }
+  const src = payload.project;
+  const newP = {
+    id:uid(),
+    name:(src.name||"פרויקט מיובא")+" (מיובא)",
+    targetVersion: src.targetVersion || "1.21.6",
+    packFormat: src.packFormat || pfFor(src.targetVersion||"1.21.6"),
+    description: src.description||"",
+    sources: [],
+  };
+  for(const s of (src.sources||[])){
+    const ns = {...s};
+    delete ns.blobBase64;
+    ns.id = uid();
+    if(s.blobBase64){
+      try{ await DB.put(ns.id, base64ToBytes(s.blobBase64).buffer); ns.hasBlob=true; }
+      catch{ ns.hasBlob=false; }
+    }
+    newP.sources.push(ns);
+  }
+  state.unshift(newP); selectedId=newP.id; localStorage.setItem(LS_SEL,newP.id);
+  save(); renderAll();
+  alert(`הפרויקט "${newP.name}" יובא בהצלחה עם ${newP.sources.length} מקורות, כולל הסדר וקובצי ה־ZIP.`);
+}
+
+document.getElementById("importProjBtn").addEventListener("click",()=>{
+  document.getElementById("importProjFile").click();
+});
+document.getElementById("importProjFile").addEventListener("change",async(e)=>{
+  const f = e.target.files[0];
+  e.target.value = ""; // מאפשר לייבא שוב אותו קובץ בעתיד
+  if(f) await importProjectFromFile(f);
+});
 
 /* ============================================================
    עזרים
