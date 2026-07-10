@@ -964,7 +964,7 @@ async function buildProject(){
         }
 
         out.file(lowRel, data);
-        claimed.set(lowRel,{title:s.title});
+        claimed.set(lowRel,{title:s.title, id:s.id});
         added++;
       }
       logLine(`&nbsp;&nbsp;↳ נוספו <b>${added}</b> קבצים, ${over} נדרסו (עדיפות נמוכה)`, "ok");
@@ -973,6 +973,26 @@ async function buildProject(){
     if(!claimed.size){ logLine("לא נמצאו קבצים למיזוג.","err"); return; }
     if(caseFixed) logLine(`🔡 תוקנו ${caseFixed} נתיבי-קבצים לאותיות קטנות (מונע missing texture מאי-התאמת רישיות)`,"dim");
     if(jsonBroken) logLine(`⚠️ ${jsonBroken} קבצי JSON של מודלים/בלוקסטייטס לא היו תקינים ולא נורמלו (הועתקו כמות שהם)`,"warn");
+
+    // מניעת "2 דברים על דבר אחד": טקסטורה מונפשת (X.png) וקובץ האנימציה שלה (X.png.mcmeta) חייבים
+    // להגיע מאותו מקור — אם הם מגיעים ממקורות שונים (כי כל אחד "ניצח" בנפרד לפי עדיפות), הממדים/
+    // מספר הפריימים כנראה לא תואמים, וזה בדיוק מה שגורם לאנימציה מתוחה/שבורה (מים, לבה, פורטל וכו').
+    const mismatchedAnim = [];
+    for(const path of [...claimed.keys()]){
+      if(!/^assets\/[^/]+\/textures\/.*\.png$/.test(path)) continue;
+      const mcPath = path+".mcmeta";
+      const pngWin = claimed.get(path);
+      const mcWin = claimed.get(mcPath);
+      if(mcWin && mcWin.id!==pngWin.id){
+        out.remove(mcPath);
+        claimed.delete(mcPath);
+        mismatchedAnim.push({path, pngFrom:pngWin.title, mcmetaFrom:mcWin.title});
+      }
+    }
+    if(mismatchedAnim.length){
+      logLine(`🎞️ נמנעו ${mismatchedAnim.length} התנגשויות אנימציה (הטקסטורה וקובץ האנימציה שלה הגיעו ממקורות שונים ולא תואמים) — האנימציה הוסרה כדי למנוע גליץ':`,"warn");
+      mismatchedAnim.slice(0,10).forEach(m=>logLine(`&nbsp;&nbsp;• ${escapeHtml(m.path)} — טקסטורה מ־${escapeHtml(m.pngFrom)}, אנימציה (הוסרה) הייתה מ־${escapeHtml(m.mcmetaFrom)}`,"warn"));
+    }
 
     // pack.mcmeta חדש
     const mcmeta = {
@@ -1012,13 +1032,34 @@ async function buildProject(){
         if(!out.files[full]) missingMdl.push({ref:m, full, from:pth});
       }
     }
-    if(missingTex.length || missingMdl.length){
-      logLine(`❌ נמצאו <b>${missingTex.length}</b> הפניות לטקסטורות ו-<b>${missingMdl.length}</b> הפניות למודלים שחסרים בפועל — אלה יופיעו כטקסטורה שחורה-ורודה (missing texture) במשחק:`,"err");
-      missingTex.slice(0,15).forEach(m=>logLine(`&nbsp;&nbsp;🖼️ חסר: <b>${escapeHtml(m.full)}</b> — מוזכר ב־${escapeHtml(m.from)}`,"err"));
+    // אותה בדיקה, גם עבור קובצי סאונד המוזכרים ב-sounds.json (namespaces מותאמים אישית)
+    const missingSnd = [];
+    const soundsJsonPaths = Object.keys(out.files).filter(p=>!out.files[p].dir && /^assets\/[^/]+\/sounds\.json$/.test(p));
+    for(const pth of soundsJsonPaths){
+      let obj;
+      try{ obj = JSON.parse(await out.files[pth].async("string")); }catch{ continue; }
+      for(const evKey of Object.keys(obj)){
+        const ev = obj[evKey];
+        const list = Array.isArray(ev&&ev.sounds) ? ev.sounds : [];
+        for(const snd of list){
+          const name = typeof snd==="string" ? snd : (snd&&snd.name);
+          if(!name) continue;
+          const {ns,path:sp} = resolveNsPath(normalizeResourceLocation(name));
+          if(ns==="minecraft") continue;
+          const full = `assets/${ns}/sounds/${sp}.ogg`;
+          if(!out.files[full]) missingSnd.push({ref:name, full, from:pth});
+        }
+      }
+    }
+
+    if(missingTex.length || missingMdl.length || missingSnd.length){
+      logLine(`❌ נמצאו <b>${missingTex.length}</b> הפניות לטקסטורות, <b>${missingMdl.length}</b> למודלים ו-<b>${missingSnd.length}</b> לקובצי סאונד שחסרים בפועל — אלה יופיעו כטקסטורה שחורה-ורודה (missing texture) או סאונד שקט/שגיאה במשחק:`,"err");
+      missingTex.slice(0,15).forEach(m=>logLine(`&nbsp;&nbsp;🖼️ טקסטורה חסרה: <b>${escapeHtml(m.full)}</b> — מוזכר ב־${escapeHtml(m.from)}`,"err"));
       missingMdl.slice(0,15).forEach(m=>logLine(`&nbsp;&nbsp;🧱 מודל חסר: <b>${escapeHtml(m.full)}</b> — מוזכר ב־${escapeHtml(m.from)}`,"err"));
-      const extra = (missingTex.length+missingMdl.length)-30;
+      missingSnd.slice(0,15).forEach(m=>logLine(`&nbsp;&nbsp;🔊 סאונד חסר: <b>${escapeHtml(m.full)}</b> — מוזכר ב־${escapeHtml(m.from)}`,"err"));
+      const extra = (missingTex.length+missingMdl.length+missingSnd.length)-45;
       if(extra>0) logLine(`&nbsp;&nbsp;...ועוד ${extra} נוספים`,"err");
-      logLine(`↳ תקן זאת במקור (חסר קובץ טקסטורה/מודל תואם), או הוסף מקור נוסף שמספק אותו.`,"warn");
+      logLine(`↳ תקן זאת במקור (חסר קובץ תואם), או הוסף מקור נוסף שמספק אותו.`,"warn");
     } else {
       logLine("✅ לא נמצאו הפניות שבורות ב-namespaces מותאמים אישית.","ok");
     }
