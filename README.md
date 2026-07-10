@@ -60,8 +60,8 @@
 בכל פרויקט יש כרטיס **"🎨 טקסטורות פריט מותאמות"** שבו מגדירים כללים לכל פריט (לא רק טוטם):
 - **שם ריק** = טקסטורה רגילה לפריט (מחליפה את `assets/<ns>/textures/item/<item>.png`) — עובד בכל מיינקראפט, בלי תוספים.
 - **שם מלא** = הטקסטורה תופיע רק כשקוראים לפריט בשם הזה בסדן (למשל טוטם ששמו `banana`). המנגנון תלוי בגרסת היעד:
-  - **גרסת יעד 1.21.4+ (pack_format 46+)** → נוצר כ-**item model וניל** (`assets/<ns>/items/<item>.json` עם `select` על הרכיב `minecraft:custom_name`, פלוס מודל+טקסטורה לכל וריאנט). **עובד בלי שום מוד, כולל עם Sodium.** זו בדיוק השיטה של חבילות כמו [Totem Pets](https://modrinth.com/resourcepack/totem-pets).
-  - **גרסה ישנה מ-1.21.4** → נוצר כ-**CIT** (`assets/minecraft/optifine/cit/*.properties`), שדורש [CIT Resewn](https://modrinth.com/mod/cit-resewn) או OptiFine (Sodium לבד לא קורא CIT).
+  - **גרסת יעד 1.21.5+ (pack_format 55+)** → נוצר כ-**item model וניל** (`assets/<ns>/items/<item>.json` עם `select` על הרכיב `minecraft:custom_name`, פלוס מודל+טקסטורה לכל וריאנט). **עובד בלי שום מוד, כולל עם Sodium.** זו בדיוק השיטה של חבילות כמו [Totem Pets](https://modrinth.com/resourcepack/totem-pets).
+  - **גרסה ישנה מ-1.21.5 (כולל 1.21.4)** → נוצר כ-**CIT** (`assets/minecraft/optifine/cit/*.properties`), שדורש [CIT Resewn](https://modrinth.com/mod/cit-resewn) או OptiFine (Sodium לבד לא קורא CIT). התמיכה הוונילית ב-`custom_name` נוספה רק ב-1.21.5.
 
   מבנה ה-item model הווניל שנוצר:
   ```json

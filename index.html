@@ -997,8 +997,9 @@ function citName(name){ return String(name||"").replace(/[\r\n=]/g,"").trim(); }
 function citPropsFor(slug, itemId, name){
   return `type=item\nitems=${itemId}\ntexture=${slug}.png\nnbt.display.Name=ipattern:${citName(name)}\n`;
 }
-// 1.21.4+ (pack_format 46+) תומך בבחירת מודל לפי שם מותאם — וניל, בלי מודים (עובד עם Sodium).
-const CIT_MODERN_MIN_PF = 46;
+// בחירת מודל לפי custom_name (וניל, בלי מודים, עובד עם Sodium) נתמכת החל מ-1.21.5 (pack_format 55).
+// בגרסאות ישנות יותר (כולל 1.21.4) עדיין צריך OptiFine / CIT Resewn.
+const CIT_MODERN_MIN_PF = 55;
 function citIsModern(p){ return (p.packFormat||0) >= CIT_MODERN_MIN_PF; }
 
 // מייצר את קבצי הטקסטורות/מודלים מהכללים (קורא תמונות מ-IndexedDB).
@@ -1069,13 +1070,13 @@ function renderCitSection(p){
     </div>
     ${citIsModern(p)
       ? `<div class="hint" style="margin-top:6px; padding:8px 10px; background:rgba(58,210,159,.12); border-radius:8px; border:1px solid rgba(58,210,159,.35)">
-          ✅ גרסת היעד (<b>${escapeHtml(p.targetVersion)}</b>) היא 1.21.4+, אז "לפי שם" נוצר כ-<b>item model וניל</b> —
+          ✅ גרסת היעד (<b>${escapeHtml(p.targetVersion)}</b>) היא 1.21.5+, אז "לפי שם" נוצר כ-<b>item model וניל</b> —
           עובד <b>בלי שום מוד</b>, כולל עם Sodium. (התמונה מוצגת כספרייט שטוח.)
         </div>`
       : `<div class="hint" style="margin-top:6px; padding:8px 10px; background:rgba(246,196,83,.12); border-radius:8px; border:1px solid rgba(246,196,83,.35)">
-          ⚠️ גרסת היעד (<b>${escapeHtml(p.targetVersion)}</b>) ישנה מ-1.21.4, אז "לפי שם" נוצר כ-CIT ודורש
-          <a href="https://modrinth.com/mod/cit-resewn" target="_blank">CIT Resewn</a> או OptiFine.
-          כדי לקבל וניל (בלי מודים) — שנה את גרסת היעד ל-1.21.4 ומעלה.
+          ⚠️ גרסת היעד (<b>${escapeHtml(p.targetVersion)}</b>) ישנה מ-1.21.5, אז "לפי שם" נוצר כ-CIT ודורש
+          <a href="https://modrinth.com/mod/cit-resewn" target="_blank">CIT Resewn</a> או OptiFine (זה כולל את 1.21.4).
+          כדי לקבל וניל בלי מודים — שנה את גרסת היעד ל-<b>1.21.5</b> ומעלה.
         </div>`}
     <div id="citList"></div>
     <div class="toolbar"><button id="citAddBtn" class="ghost">➕ הוסף כלל</button></div>
@@ -1248,8 +1249,8 @@ async function buildMergedPack(){
         for(const f of itemFiles) out.file(f.path, f.data);
         logLine(`🎨 נוספו טקסטורות פריט מותאמות: ${normals} רגילות, ${named} לפי שם`,"ok");
         if(named>0){
-          if(modern) logLine(`✅ טקסטורות "לפי שם" נוצרו כ-item model וניל (1.21.4+) — עובד עם Sodium בלי מודים.`,"ok");
-          else logLine(`⚠️ גרסת היעד ישנה מ-1.21.4 — טקסטורות "לפי שם" נוצרו כ-CIT ודורשות OptiFine / CIT Resewn.`,"warn");
+          if(modern) logLine(`✅ טקסטורות "לפי שם" נוצרו כ-item model וניל (1.21.5+) — עובד עם Sodium בלי מודים.`,"ok");
+          else logLine(`⚠️ גרסת היעד ישנה מ-1.21.5 — טקסטורות "לפי שם" נוצרו כ-CIT ודורשות OptiFine / CIT Resewn.`,"warn");
         }
       }
     }catch(err){ logLine(`⚠️ יצירת טקסטורות פריט נכשלה: ${escapeHtml(err.message)}`,"warn"); }
