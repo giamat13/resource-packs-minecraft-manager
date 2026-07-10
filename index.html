@@ -133,6 +133,7 @@
   <h1>🧩 מנהל חבילות משאבים — Minecraft</h1>
   <span class="badge" id="storeBadge"></span>
   <div class="grow"></div>
+  <button id="snapshotsBtn" class="ghost sm" title="גיבויים אוטומטיים">🕘 גיבויים</button>
   <span class="badge">נשמר אוטומטית בדפדפן</span>
 </header>
 
@@ -291,6 +292,21 @@
   <div class="dlg-f">
     <button id="addConfirm" class="ok">הוסף מקור</button>
     <button class="ghost" onclick="document.getElementById('addDlg').close()">ביטול</button>
+  </div>
+</dialog>
+
+<!-- Snapshots (auto-backup) dialog -->
+<dialog id="snapDlg">
+  <div class="dlg-h">🕘 גיבויים אוטומטיים</div>
+  <div class="dlg-b">
+    <div class="hint" style="margin-top:0">
+      הכלי שומר גיבוי אוטומטי של <b>הגדרות הפרויקטים</b> (לא קובצי ZIP/תמונות/אודיו שהעלית — אלה נשארים רק ב-IndexedDB) כל דקה אם היה שינוי, ושומר עד 20 גיבויים אחרונים בדפדפן הזה.
+      שימושי במקרה של מחיקה או שינוי בטעות. שחזור מחליף את <b>כל</b> הפרויקטים הנוכחיים בדפדפן הזה בגיבוי שנבחר.
+    </div>
+    <div id="snapList" style="margin-top:10px"></div>
+  </div>
+  <div class="dlg-f">
+    <button class="ghost" onclick="document.getElementById('snapDlg').close()">סגור</button>
   </div>
 </dialog>
 
@@ -513,6 +529,7 @@ function renderMain(){
       </div>
       <div class="toolbar">
         <button id="exportProjBtn" class="ghost">⬇️ ייצוא פרויקט (JSON)</button>
+        <button id="dupProjBtn" class="ghost">📋 שכפל פרויקט</button>
         <span class="hint" style="margin:0">מעבר למחשב אחר: ייצוא כאן → ייבוא 📥 בסרגל הצד. כולל את כל קובצי ה־ZIP שהעלית ואת הסדר.</span>
       </div>
       <div class="hint" id="exportStatus"></div>
@@ -578,6 +595,7 @@ function renderMain(){
   bind("buildBtn","click",buildProject);
   bind("buildExeBtn","click",buildInstallerExe);
   bind("exportProjBtn","click",()=>exportProject(p));
+  bind("dupProjBtn","click",()=>duplicateProject(p));
   // --- טקסטורות פריט/בלוק + סאונד מותאמים (כרטיס אחד משותף) ---
   renderCustomAssetsSection(p);
   // --- חסימה/נעילה לפריט/בלוק/סאונד ---
@@ -661,6 +679,8 @@ function renderSources(){
                : s.refUrl ? escapeHtml(s.refUrl) : s.kind;
     const prioTag = i===0 ? `<span class="prio-tag top">הכי חשוב</span>`
                   : i===p.sources.length-1 ? `<span class="prio-tag bottom">בסיס/גיבוי</span>` : "";
+    const updateBtn = (s.kind==="modrinth" && s.modrinthProject)
+      ? `<button class="ghost sm" data-act="checkupdate" title="בדוק עדכון ב-Modrinth">🔔</button>` : "";
     div.innerHTML = `
       <input type="checkbox" class="src-check" ${srcSelection.has(s.id)?"checked":""} title="בחר לפעולה המונית">
       <div class="grip" title="גרור לשינוי עדיפות">⠿</div>
@@ -674,6 +694,7 @@ function renderSources(){
         <button class="ghost sm" data-act="up" ${i===0?"disabled":""} title="העלה עדיפות">▲</button>
         <button class="ghost sm" data-act="down" ${i===p.sources.length-1?"disabled":""} title="הורד עדיפות">▼</button>
         <button class="ghost sm" data-act="toggle" title="הפעל/כבה">${s.enabled?"👁":"🚫"}</button>
+        ${updateBtn}
         <button class="danger sm" data-act="del" title="מחק">🗑</button>
       </div>`;
     div.querySelectorAll("button[data-act]").forEach(b=>{
@@ -723,10 +744,11 @@ function moveSource(fromId,toId){
   save(); renderSources(); renderProjects();
 }
 
-function srcAction(sid,act){
+async function srcAction(sid,act){
   const p = curProj();
   const i = p.sources.findIndex(s=>s.id===sid);
   if(i<0) return;
+  if(act==="checkupdate"){ await checkForSourceUpdate(p, p.sources[i]); return; }
   if(act==="up" && i>0){ [p.sources[i-1],p.sources[i]]=[p.sources[i],p.sources[i-1]]; }
   if(act==="down" && i<p.sources.length-1){ [p.sources[i+1],p.sources[i]]=[p.sources[i],p.sources[i+1]]; }
   if(act==="toggle"){ p.sources[i].enabled=!p.sources[i].enabled; }
@@ -736,6 +758,43 @@ function srcAction(sid,act){
     p.sources.splice(i,1);
   }
   save(); renderSources(); renderProjects();
+}
+
+// בדיקת עדכון גרסה למקור Modrinth: משווה ל-versionId השמור, מציע לעדכן (מחליף downloadUrl/versionId וכו')
+async function checkForSourceUpdate(p, s){
+  if(!s.modrinthProject){ alert("בדיקת עדכון זמינה רק למקורות Modrinth."); return; }
+  const btn = document.querySelector(`.src[data-id="${s.id}"] [data-act="checkupdate"]`);
+  if(btn){ btn.disabled=true; btn.textContent="⏳"; }
+  try{
+    const versions = await modrinthVersions(s.modrinthProject);
+    if(!versions.length){ alert("לא נמצאו גרסאות עבור המקור הזה ב-Modrinth."); return; }
+    versions.sort((a,b)=> new Date(b.date_published) - new Date(a.date_published));
+    const latest = versions[0];
+    if(latest.id === s.versionId){
+      alert(`"${s.title}" כבר מעודכן לגרסה האחרונה (${s.versionName||"?"}).`);
+      return;
+    }
+    const gv = (latest.game_versions||[]).slice(0,6).join(", ");
+    const doUpdate = confirm(
+      `גרסה חדשה זמינה עבור "${s.title}":\n${s.versionName||"?"} → ${latest.version_number||latest.name}\n`+
+      `גרסאות מיינקראפט תואמות: ${gv}\n\nלעדכן עכשיו?`
+    );
+    if(!doUpdate) return;
+    const file = (latest.files||[]).find(f=>f.primary) || latest.files[0];
+    if(!file){ alert("לגרסה החדשה אין קובץ להורדה."); return; }
+    s.versionId = latest.id;
+    s.versionName = latest.version_number;
+    s.downloadUrl = file.url;
+    s.filename = file.filename;
+    s.gameVersions = latest.game_versions||[];
+    zipIndexCache.delete(s.id);
+    save(); renderSources(); renderProjects();
+    alert(`"${s.title}" עודכן לגרסה ${s.versionName}.`);
+  }catch(err){
+    alert("שגיאה בבדיקת עדכון: "+err.message);
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent="🔔"; }
+  }
 }
 
 function renderAll(){ renderProjects(); renderMain(); updateBadge(); }
@@ -2254,6 +2313,72 @@ async function importProjectFromFile(file){
   alert(`הפרויקט "${newP.name}" יובא בהצלחה עם ${newP.sources.length} מקורות, כולל הסדר, האייקון וקובצי ה־ZIP.`);
 }
 
+// שכפול פרויקט: עותק מלא כולל כל הבייטים ב-IndexedDB (מקורות, אייקון, טקסטורות/אודיו מותאמים).
+// מזהי rule/source/sourceId מקבלים id חדש כדי לא לחלוק blobs עם המקור.
+async function duplicateProject(p){
+  const btn = document.getElementById("dupProjBtn");
+  if(btn){ btn.disabled=true; btn.textContent="⏳ משכפל..."; }
+  try{
+    const newP = JSON.parse(JSON.stringify(p));
+    newP.id = uid();
+    newP.name = p.name + " (עותק)";
+
+    const srcIdMap = new Map();
+    for(const s of newP.sources){
+      const oldId = s.id;
+      s.id = uid();
+      srcIdMap.set(oldId, s.id);
+      if(s.hasBlob){
+        const buf = await DB.get(oldId);
+        if(buf) await DB.put(s.id, buf); else s.hasBlob = false;
+      }
+    }
+    if(newP.hasIcon){
+      const buf = await DB.get("icon:"+p.id);
+      if(buf) await DB.put("icon:"+newP.id, buf); else newP.hasIcon = false;
+    }
+    if(newP.cit && Array.isArray(newP.cit.rules)){
+      for(const r of newP.cit.rules){
+        const oldId = r.id; r.id = uid();
+        if(r.hasTex){
+          const buf = await DB.get(`cit:${p.id}:${oldId}`);
+          if(buf) await DB.put(`cit:${newP.id}:${r.id}`, buf); else r.hasTex = false;
+        }
+      }
+    }
+    if(newP.blocks && Array.isArray(newP.blocks.rules)){
+      for(const r of newP.blocks.rules){
+        const oldId = r.id; r.id = uid();
+        for(const f of ["all",...BLOCK_FACES]){
+          const buf = await DB.get(`blk:${p.id}:${oldId}:${f}`);
+          if(buf) await DB.put(`blk:${newP.id}:${r.id}:${f}`, buf);
+        }
+      }
+    }
+    if(newP.sounds && Array.isArray(newP.sounds.rules)){
+      for(const r of newP.sounds.rules){
+        const oldId = r.id; r.id = uid();
+        if(r.hasAudio){
+          const buf = await DB.get(`snd:${p.id}:${oldId}`);
+          if(buf) await DB.put(`snd:${newP.id}:${r.id}`, buf); else r.hasAudio = false;
+        }
+      }
+    }
+    if(newP.locks && Array.isArray(newP.locks.rules)){
+      for(const r of newP.locks.rules){
+        r.id = uid();
+        if(r.sourceId) r.sourceId = srcIdMap.get(r.sourceId) || null;
+      }
+    }
+    state.unshift(newP); selectedId = newP.id; localStorage.setItem(LS_SEL, newP.id);
+    save(); renderAll();
+  }catch(err){
+    alert("שכפול הפרויקט נכשל: "+err.message);
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent="📋 שכפל פרויקט"; }
+  }
+}
+
 document.getElementById("importProjBtn").addEventListener("click",()=>{
   document.getElementById("importProjFile").click();
 });
@@ -2302,6 +2427,75 @@ async function refreshIconPreview(p){
   if(rm) rm.disabled = true;
 }
 
+/* ============================================================
+   גיבוי אוטומטי (snapshots) — מגן מפני מחיקה/שינוי בטעות ב-localStorage.
+   שומר רק את state (הגדרות הפרויקטים), לא בייטים מ-IndexedDB (מכסת localStorage מוגבלת).
+   ============================================================ */
+const LS_SNAP = "rpm.snapshots.v1";
+const SNAP_MAX = 20;
+const SNAP_INTERVAL_MS = 60000;
+let _lastSnapshotJson = null;
+
+function loadSnapshots(){
+  try{ return JSON.parse(localStorage.getItem(LS_SNAP)) || []; }catch{ return []; }
+}
+function saveSnapshots(snaps){
+  while(snaps.length){
+    try{ localStorage.setItem(LS_SNAP, JSON.stringify(snaps)); return; }
+    catch{ snaps.shift(); } // מכסת אחסון חרגה — מוריד את הגיבוי הישן ביותר ומנסה שוב
+  }
+  try{ localStorage.removeItem(LS_SNAP); }catch{}
+}
+function takeSnapshotIfChanged(){
+  const json = JSON.stringify(state);
+  if(json === _lastSnapshotJson) return;
+  _lastSnapshotJson = json;
+  if(!state.length) return; // אין מה לגבות
+  const snaps = loadSnapshots();
+  snaps.push({at: new Date().toISOString(), data: json});
+  while(snaps.length > SNAP_MAX) snaps.shift();
+  saveSnapshots(snaps);
+}
+setInterval(takeSnapshotIfChanged, SNAP_INTERVAL_MS);
+
+function openSnapshotsDialog(){
+  renderSnapshotsList();
+  document.getElementById("snapDlg").showModal();
+}
+function renderSnapshotsList(){
+  const el = document.getElementById("snapList");
+  const snaps = loadSnapshots().slice().reverse(); // החדש ביותר קודם
+  if(!snaps.length){
+    el.innerHTML = `<div class="hint">אין עדיין גיבויים. גיבוי ראשון נוצר תוך דקה מהשינוי הראשון בפרויקט.</div>`;
+    return;
+  }
+  el.innerHTML = "";
+  snaps.forEach(snap=>{
+    let nProjects = 0;
+    try{ nProjects = (JSON.parse(snap.data)||[]).length; }catch{}
+    const d = document.createElement("div");
+    d.className = "ver";
+    const dt = new Date(snap.at);
+    d.innerHTML = `<div class="vn">${escapeHtml(dt.toLocaleString("he-IL"))} <span class="vg">${nProjects} פרויקטים</span></div>
+      <button class="ghost sm">שחזר</button>`;
+    d.querySelector("button").addEventListener("click", e=>{ e.stopPropagation(); restoreSnapshot(snap); });
+    el.appendChild(d);
+  });
+}
+function restoreSnapshot(snap){
+  const dt = new Date(snap.at).toLocaleString("he-IL");
+  if(!confirm(`לשחזר את הגיבוי מ-${dt}?\nזה יחליף את כל הפרויקטים הנוכחיים בדפדפן הזה (הגדרות בלבד — קבצי ZIP/תמונות/אודיו שהועלו לא נמחקים ולא משוחזרים, ה-IndexedDB לא נוגע).`)) return;
+  try{
+    state = JSON.parse(snap.data);
+    selectedId = (state[0] && state[0].id) || null;
+    localStorage.setItem(LS_SEL, selectedId||"");
+    _lastSnapshotJson = null; // מכריח לקחת גיבוי חדש בפעם הבאה שיהיה שינוי, כדי לשמור את נקודת השחזור
+    save(); renderAll();
+    document.getElementById("snapDlg").close();
+  }catch(err){ alert("שחזור נכשל: "+err.message); }
+}
+document.getElementById("snapshotsBtn").addEventListener("click", openSnapshotsDialog);
+
 // ---------- פרויקט חדש ----------
 document.getElementById("newProjBtn").addEventListener("click",()=>{
   const defVer = "1.21.6";
@@ -2315,6 +2509,7 @@ document.getElementById("newProjBtn").addEventListener("click",()=>{
 });
 
 // ---------- אתחול ----------
+_lastSnapshotJson = JSON.stringify(state); // בסיס לגיבוי — הגיבוי הראשון ייווצר אחרי השינוי הראשון
 renderAll();
 </script>
 </body>
