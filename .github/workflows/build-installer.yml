@@ -1,0 +1,43 @@
+name: Build installer stub
+
+# בונה מחדש את ה-stub EXE של המתקין (installer/MC-Pack-Installer-stub.exe).
+# ה-stub הוא הבסיס שהכלי בדפדפן מדביק אליו את החבילה (self-extracting).
+# הרץ ידנית אחרי שינוי ב-installer/mc_pack_installer.py, הורד את ה-artifact,
+# והחלף בו את הקובץ שב-repo (commit).  אין תלות ב-Releases.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller
+
+      - name: Build stub EXE
+        run: >
+          pyinstaller --onefile --windowed
+          --name "MC-Pack-Installer-stub"
+          installer/mc_pack_installer.py
+
+      - name: Smoke test (headless detection + no embedded payload)
+        run: |
+          dist/MC-Pack-Installer-stub.exe --list
+          dist/MC-Pack-Installer-stub.exe --check-embed
+
+      - name: Upload stub artifact (download & commit to installer/)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MC-Pack-Installer-stub
+          path: dist/MC-Pack-Installer-stub.exe

@@ -10,6 +10,13 @@ dist/
 *.log
 npm-debug.log*
 
+# PyInstaller / Python build artifacts
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db

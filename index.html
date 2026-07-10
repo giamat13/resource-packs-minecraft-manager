@@ -429,7 +429,25 @@ function renderMain(){
         <button id="buildBtn" class="ok">בנה חבילה ממוזגת (ZIP)</button>
         <span class="hint" style="margin:0">מוריד מ־Modrinth וממזג הכל לקובץ אחד</span>
       </div>
+      <div class="toolbar" style="margin-top:8px">
+        <button id="buildExeBtn" class="ok">⬇️ בנה מתקין EXE (עם החבילה בפנים)</button>
+        <span class="hint" style="margin:0">מוריד EXE אחד עצמאי ל-Windows — החבילה כבר בתוכו</span>
+      </div>
       <div class="log" id="buildLog" style="display:none"></div>
+    </div>
+
+    <div class="card">
+      <h3>⬇️ התקנה אוטומטית לכל ה-Instances (Windows)</h3>
+      <div class="hint" style="margin-top:-4px">
+        לחיצה על <b>"בנה מתקין EXE"</b> למעלה מורידה קובץ EXE יחיד שהחבילה כבר מוטמעת בתוכו — בלי קבצים נפרדים.
+        מריצים אותו במחשב עם מיינקראפט, והוא מזהה אוטומטית את כל ה-instances שלך
+        (<b>Minecraft רגיל, CurseForge, Modrinth App</b>, וגם Prism/ATLauncher/GDLauncher),
+        נותן לבחור אותם (עם כפתור <b>"בחר הכל"</b>), ומתקין את החבילה לכולם בבת אחת. פשוט מורידים ומפעילים.
+      </div>
+      <div class="hint" style="margin-top:6px">
+        💡 SmartScreen עלול להזהיר על EXE לא-חתום (זה נורמלי למתקינים כאלה) — "More info" → "Run anyway".
+        <br>ℹ️ בניית ה-EXE עובדת מהאתר המתארח (GitHub Pages). בפתיחת הקובץ מקומית (file://) הדפדפן חוסם את טעינת בסיס המתקין.
+      </div>
     </div>
   `;
   document.getElementById("pTitle").textContent = p.name;
@@ -441,6 +459,7 @@ function renderMain(){
   bind("pDesc","input",e=>{ p.description=e.target.value; save(); });
   bind("addSrcBtn","click",openAddDialog);
   bind("buildBtn","click",buildProject);
+  bind("buildExeBtn","click",buildInstallerExe);
   bind("exportProjBtn","click",()=>exportProject(p));
   bind("itemSearchBtn","click",()=>searchItem(document.getElementById("itemQuery").value));
   document.getElementById("itemQuery").addEventListener("keydown",e=>{
@@ -898,15 +917,13 @@ function renderItemSearchResults({q, targetNs, targetPath, rows, suggestions, sk
   });
 }
 
-async function buildProject(){
+// ממזג את כל המקורות הפעילים ומחזיר {blob, fname} — או null בכשל. משותף להורדת ZIP ולבניית EXE.
+async function buildMergedPack(){
   const p = curProj();
-  const log = document.getElementById("buildLog");
-  log.style.display="block"; log.innerHTML="";
-  const btn = document.getElementById("buildBtn");
-  btn.disabled=true;
-  try{
-    const sources = p.sources.filter(s=>s.enabled);
-    if(!sources.length){ logLine("אין מקורות פעילים.","err"); return; }
+  const sources = p.sources.filter(s=>s.enabled);
+  if(!sources.length){ logLine("אין מקורות פעילים.","err"); return null; }
+  {
+    logLine(`מתחיל מיזוג של <b>${sources.length}</b> מקורות → "${escapeHtml(p.name)}"`,"dim");
     logLine(`מתחיל מיזוג של <b>${sources.length}</b> מקורות → "${escapeHtml(p.name)}"`,"dim");
 
     // מ־top לתחתון. index 0 = הכי גבוה (גובר)
@@ -970,7 +987,7 @@ async function buildProject(){
       logLine(`&nbsp;&nbsp;↳ נוספו <b>${added}</b> קבצים, ${over} נדרסו (עדיפות נמוכה)`, "ok");
     }
 
-    if(!claimed.size){ logLine("לא נמצאו קבצים למיזוג.","err"); return; }
+    if(!claimed.size){ logLine("לא נמצאו קבצים למיזוג.","err"); return null; }
     if(caseFixed) logLine(`🔡 תוקנו ${caseFixed} נתיבי-קבצים לאותיות קטנות (מונע missing texture מאי-התאמת רישיות)`,"dim");
     if(jsonBroken) logLine(`⚠️ ${jsonBroken} קבצי JSON של מודלים/בלוקסטייטס לא היו תקינים ולא נורמלו (הועתקו כמות שהם)`,"warn");
 
@@ -1067,13 +1084,76 @@ async function buildProject(){
     logLine("דוחס ל־ZIP...","dim");
     const blob = await out.generateAsync({type:"blob",compression:"DEFLATE",compressionOptions:{level:6}});
     const fname = (p.name||"pack").replace(/[^\w֐-׿ .-]/g,"_")+".zip";
-    downloadBlob(blob,fname);
-    logLine(`✅ הושלם! הורד: <b>${escapeHtml(fname)}</b> (${(blob.size/1024/1024).toFixed(2)} MB)`,"ok");
+    return {blob, fname};
+  }
+}
+
+async function buildProject(){
+  const log = document.getElementById("buildLog");
+  log.style.display="block"; log.innerHTML="";
+  const btn = document.getElementById("buildBtn");
+  btn.disabled=true;
+  try{
+    const r = await buildMergedPack();
+    if(!r) return;
+    downloadBlob(r.blob, r.fname);
+    logLine(`✅ הושלם! הורד: <b>${escapeHtml(r.fname)}</b> (${(r.blob.size/1024/1024).toFixed(2)} MB)`,"ok");
   }catch(err){
     logLine("שגיאה כללית: "+escapeHtml(err.message),"err");
     console.error(err);
   }finally{
     btn.disabled=false;
+  }
+}
+
+// בונה EXE מתקין עם החבילה מוטמעת בזנב (self-extracting), ומוריד אותו — בלי releases.
+const STUB_URL = "installer/MC-Pack-Installer-stub.exe";
+const EMBED_MAGIC = "MCPKZIP1";
+async function buildInstallerExe(){
+  const log = document.getElementById("buildLog");
+  log.style.display="block"; log.innerHTML="";
+  const btn = document.getElementById("buildExeBtn");
+  const buildBtn = document.getElementById("buildBtn");
+  btn.disabled=true; buildBtn.disabled=true;
+  try{
+    const r = await buildMergedPack();
+    if(!r) return;
+    logLine("מוריד את בסיס המתקין (stub)...","dim");
+    let stubBuf;
+    try{
+      const resp = await fetch(STUB_URL);
+      if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      stubBuf = new Uint8Array(await resp.arrayBuffer());
+    }catch(err){
+      logLine(`❌ לא ניתן להוריד את בסיס המתקין (${escapeHtml(err.message)}). ודא שהקובץ ${escapeHtml(STUB_URL)} קיים לצד האתר.`,"err");
+      return;
+    }
+    if(stubBuf.byteLength < 100000){
+      logLine("❌ בסיס המתקין נראה לא תקין (קטן מדי). ודא שקובץ ה-EXE הועלה כראוי (לא Git LFS pointer).","err");
+      return;
+    }
+    logLine("מרכיב את ה-EXE עם החבילה בפנים...","dim");
+    const packBytes = new Uint8Array(await r.blob.arrayBuffer());
+    const nameBytes = new TextEncoder().encode(r.fname);
+    // block = name_len(2 LE) + name + zip
+    const block = new Uint8Array(2 + nameBytes.length + packBytes.length);
+    new DataView(block.buffer).setUint16(0, nameBytes.length, true);
+    block.set(nameBytes, 2);
+    block.set(packBytes, 2 + nameBytes.length);
+    // footer = MAGIC(8) + block_len(8 LE)
+    const footer = new Uint8Array(16);
+    footer.set(new TextEncoder().encode(EMBED_MAGIC), 0);
+    new DataView(footer.buffer).setBigUint64(8, BigInt(block.length), true);
+    const exeBlob = new Blob([stubBuf, block, footer], {type:"application/octet-stream"});
+    const exeName = (curProj().name||"pack").replace(/[^\w֐-׿ .-]/g,"_")+"-Installer.exe";
+    downloadBlob(exeBlob, exeName);
+    logLine(`✅ נוצר מתקין עצמאי: <b>${escapeHtml(exeName)}</b> (${(exeBlob.size/1024/1024).toFixed(2)} MB)`,"ok");
+    logLine("הפעל אותו במחשב עם מיינקראפט → סמן instances → התקן. החבילה כבר בפנים.","dim");
+  }catch(err){
+    logLine("שגיאה כללית: "+escapeHtml(err.message),"err");
+    console.error(err);
+  }finally{
+    btn.disabled=false; buildBtn.disabled=false;
   }
 }
 
