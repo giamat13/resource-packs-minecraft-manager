@@ -1,0 +1,19 @@
+# Dependencies (JSZip is vendored into /vendor, so node_modules is optional)
+node_modules/
+
+# Build output / merged packs
+dist/
+*.zip
+!vendor/**/*.zip
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp

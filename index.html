@@ -1,0 +1,811 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>מנהל חבילות משאבים – Minecraft</title>
+<script src="vendor/jszip.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171b21; --panel2:#1e242c; --line:#2a323c;
+    --text:#e6ebf1; --muted:#93a1b0; --accent:#4ea1ff; --accent2:#3ad29f;
+    --danger:#ff6b6b; --warn:#f6c453; --chip:#242c36;
+    --radius:10px; --shadow:0 2px 10px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:"Segoe UI",system-ui,Arial,sans-serif; font-size:14px; line-height:1.5;
+    display:flex; flex-direction:column; height:100vh; overflow:hidden;
+  }
+  header{
+    display:flex; align-items:center; gap:12px; padding:10px 16px;
+    background:linear-gradient(180deg,#1a2028,#141920); border-bottom:1px solid var(--line);
+  }
+  header h1{font-size:16px; margin:0; font-weight:600}
+  header .grow{flex:1}
+  .badge{font-size:11px; color:var(--muted); background:var(--chip); padding:3px 8px; border-radius:20px}
+  .layout{flex:1; display:flex; min-height:0}
+  aside{
+    width:250px; background:var(--panel); border-inline-start:1px solid var(--line);
+    display:flex; flex-direction:column; min-height:0;
+  }
+  aside .head{padding:12px; border-bottom:1px solid var(--line); display:flex; gap:8px}
+  #projectList{flex:1; overflow:auto; padding:6px}
+  .proj{
+    padding:9px 10px; border-radius:8px; cursor:pointer; display:flex; align-items:center; gap:8px;
+    border:1px solid transparent;
+  }
+  .proj:hover{background:var(--panel2)}
+  .proj.active{background:var(--panel2); border-color:var(--accent)}
+  .proj .nm{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .proj .ct{font-size:11px; color:var(--muted)}
+  main{flex:1; overflow:auto; padding:18px 22px; min-width:0}
+  .empty{color:var(--muted); text-align:center; margin-top:80px}
+  h2{font-size:18px; margin:0 0 2px}
+  .sub{color:var(--muted); font-size:12px; margin-bottom:16px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px; margin-bottom:16px}
+  .card h3{margin:0 0 10px; font-size:14px; display:flex; align-items:center; gap:8px}
+  .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+  label.fld{display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted)}
+  input,select,textarea{
+    background:var(--panel2); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:8px 10px; font:inherit; outline:none;
+  }
+  input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+  input[type=text],input[type=url]{min-width:220px}
+  button{
+    background:var(--accent); color:#04121f; border:none; border-radius:8px;
+    padding:8px 14px; font:inherit; font-weight:600; cursor:pointer;
+  }
+  button:hover{filter:brightness(1.08)}
+  button.ghost{background:var(--chip); color:var(--text); font-weight:500}
+  button.sm{padding:4px 9px; font-size:12px}
+  button.danger{background:var(--danger); color:#160404}
+  button.ok{background:var(--accent2); color:#04140d}
+  button:disabled{opacity:.45; cursor:not-allowed; filter:none}
+  .src{
+    display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--line);
+    border-radius:9px; margin-bottom:8px; background:var(--panel2);
+  }
+  .src.disabled{opacity:.5}
+  .src.dragging{opacity:.4; border-color:var(--accent)}
+  .src.over{border-color:var(--accent2); box-shadow:0 0 0 2px rgba(58,210,159,.25)}
+  .src .grip{cursor:grab; color:var(--muted); font-size:18px; user-select:none; padding:0 2px}
+  .src .grip:active{cursor:grabbing}
+  .prio-legend{display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; font-size:12px; margin-bottom:10px; padding:6px 10px; background:var(--panel2); border-radius:8px}
+  .prio-legend .dim{color:var(--muted)}
+  .prio-tag{font-size:10px; padding:1px 7px; border-radius:20px}
+  .prio-tag.top{background:rgba(58,210,159,.2); color:var(--accent2)}
+  .prio-tag.bottom{background:var(--chip); color:var(--muted)}
+  .src .prio{font-size:12px; font-weight:700; color:var(--accent); width:20px; text-align:center}
+  .src .ico{width:26px;height:26px;flex:none;display:flex;align-items:center;justify-content:center;border-radius:6px;background:var(--chip);font-size:14px}
+  .src .info{flex:1; min-width:0}
+  .src .info .t{font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .src .info .d{font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .src .ctrls{display:flex; gap:4px; align-items:center}
+  .chip{font-size:10px; padding:2px 7px; border-radius:20px; background:var(--chip); color:var(--muted)}
+  .chip.m{color:#062; background:#bff0d8}
+  .chip.warnc{color:#3a2c00; background:#f6c453}
+  .toolbar{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:6px}
+  .log{
+    background:#0b0e12; border:1px solid var(--line); border-radius:8px; padding:10px 12px;
+    font-family:ui-monospace,Consolas,monospace; font-size:12px; white-space:pre-wrap;
+    max-height:260px; overflow:auto; margin-top:12px;
+  }
+  .log .ok{color:var(--accent2)} .log .warn{color:var(--warn)} .log .err{color:var(--danger)} .log .dim{color:var(--muted)}
+  dialog{
+    background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:12px;
+    padding:0; width:min(560px,92vw); box-shadow:var(--shadow);
+  }
+  dialog::backdrop{background:rgba(0,0,0,.55)}
+  .dlg-h{padding:14px 16px; border-bottom:1px solid var(--line); font-weight:600; font-size:15px}
+  .dlg-b{padding:16px}
+  .dlg-f{padding:12px 16px; border-top:1px solid var(--line); display:flex; gap:8px; justify-content:flex-start}
+  .seg{display:flex; gap:0; border:1px solid var(--line); border-radius:8px; overflow:hidden; width:fit-content}
+  .seg button{background:var(--panel2); color:var(--text); border-radius:0; font-weight:500}
+  .seg button.on{background:var(--accent); color:#04121f}
+  .hint{font-size:12px; color:var(--muted); margin:8px 0}
+  .verlist{max-height:220px; overflow:auto; border:1px solid var(--line); border-radius:8px; margin-top:8px}
+  .ver{padding:8px 10px; border-bottom:1px solid var(--line); cursor:pointer; display:flex; gap:8px; align-items:center}
+  .ver:last-child{border-bottom:none}
+  .ver:hover{background:var(--panel2)}
+  .ver.sel{background:rgba(78,161,255,.15)}
+  .ver .vn{flex:1}
+  .ver .vg{font-size:11px; color:var(--muted)}
+  .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--muted);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🧩 מנהל חבילות משאבים — Minecraft</h1>
+  <span class="badge" id="storeBadge"></span>
+  <div class="grow"></div>
+  <span class="badge">נשמר אוטומטית בדפדפן</span>
+</header>
+
+<div class="layout">
+  <aside>
+    <div class="head">
+      <button id="newProjBtn" style="flex:1">➕ פרויקט חדש</button>
+    </div>
+    <div id="projectList"></div>
+  </aside>
+  <main id="main"></main>
+</div>
+
+<!-- Add-source dialog -->
+<dialog id="addDlg">
+  <div class="dlg-h">הוספת מקור</div>
+  <div class="dlg-b">
+    <div class="seg" id="kindSeg">
+      <button data-kind="modrinth" class="on">Modrinth</button>
+      <button data-kind="curseforge">CurseForge</button>
+      <button data-kind="planetminecraft">PlanetMinecraft</button>
+      <button data-kind="upload">קובץ ZIP</button>
+    </div>
+
+    <div id="linkArea" style="margin-top:14px">
+      <label class="fld">קישור למקור
+        <input type="url" id="srcUrl" placeholder="https://modrinth.com/resourcepack/...">
+      </label>
+      <div class="hint" id="linkHint"></div>
+      <div class="row" style="margin-top:8px">
+        <button id="resolveBtn">🔎 חפש גרסאות</button>
+        <span id="resolveStatus" class="hint" style="margin:0"></span>
+      </div>
+      <label class="fld" style="margin-top:10px; flex-direction:row; align-items:center; gap:6px">
+        <input type="checkbox" id="onlyCompat" checked style="min-width:auto">
+        <span>הצג רק גרסאות שתואמות ל־<b id="tgtVerLbl"></b></span>
+      </label>
+      <div class="verlist" id="verList" style="display:none"></div>
+    </div>
+
+    <div id="uploadArea" style="margin-top:14px; display:none">
+      <label class="fld">בחר קובץ/י ZIP של חבילת משאבים
+        <input type="file" id="srcFile" accept=".zip" multiple>
+      </label>
+      <div class="hint">אפשר לבחור כמה קבצים בבת אחת. הם נשמרים בדפדפן ולא יימחקו ברענון.</div>
+    </div>
+
+    <div id="manualZip" style="margin-top:12px; display:none">
+      <div class="hint" style="color:var(--warn)">⚠️ אי אפשר להוריד אוטומטית מ־CurseForge/PlanetMinecraft מהדפדפן. הדבק את הקישור לתיעוד, ולאחר מכן העלה כאן את קובץ ה־ZIP שהורדת ידנית.</div>
+      <label class="fld" style="margin-top:8px">קובץ ZIP שהורדת
+        <input type="file" id="manualFile" accept=".zip">
+      </label>
+    </div>
+  </div>
+  <div class="dlg-f">
+    <button id="addConfirm" class="ok">הוסף מקור</button>
+    <button class="ghost" onclick="document.getElementById('addDlg').close()">ביטול</button>
+  </div>
+</dialog>
+
+<script>
+/* ============================================================
+   מנהל חבילות משאבים למיינקראפט — לוגיקה
+   ============================================================ */
+
+// ---- pack_format לפי גרסת מיינקראפט (resource packs) ----
+// gv = מחרוזת התאימות של Modrinth (בד"כ זהה ל-v). מקובץ לפי דור להצגה.
+const VERSIONS = [
+  // ----- 2026 (מספור year.drop) -----
+  {v:"26.2",   pf:88, g:"2026"},
+  {v:"26.1.2", pf:84, g:"2026"},
+  {v:"26.1.1", pf:84, g:"2026"},
+  {v:"26.1",   pf:84, g:"2026"},
+  // ----- 1.21.x -----
+  {v:"1.21.11",pf:75, g:"1.21.x"},
+  {v:"1.21.10",pf:69, g:"1.21.x"},
+  {v:"1.21.9", pf:69, g:"1.21.x"},
+  {v:"1.21.8", pf:64, g:"1.21.x"},
+  {v:"1.21.7", pf:64, g:"1.21.x"},
+  {v:"1.21.6", pf:63, g:"1.21.x"},
+  {v:"1.21.5", pf:55, g:"1.21.x"},
+  {v:"1.21.4", pf:46, g:"1.21.x"},
+  {v:"1.21.3", pf:42, g:"1.21.x"},
+  {v:"1.21.2", pf:42, g:"1.21.x"},
+  {v:"1.21.1", pf:34, g:"1.21.x"},
+  {v:"1.21",   pf:34, g:"1.21.x"},
+  // ----- 1.20.x -----
+  {v:"1.20.6", pf:32, g:"1.20.x"},
+  {v:"1.20.5", pf:32, g:"1.20.x"},
+  {v:"1.20.4", pf:22, g:"1.20.x"},
+  {v:"1.20.3", pf:22, g:"1.20.x"},
+  {v:"1.20.2", pf:18, g:"1.20.x"},
+  {v:"1.20.1", pf:15, g:"1.20.x"},
+  {v:"1.20",   pf:15, g:"1.20.x"},
+  // ----- ישן יותר -----
+  {v:"1.19.4", pf:13, g:"ישן יותר"},
+  {v:"1.19.3", pf:12, g:"ישן יותר"},
+  {v:"1.19.2", pf:9,  g:"ישן יותר"},
+  {v:"1.19",   pf:9,  g:"ישן יותר"},
+  {v:"1.18.2", pf:8,  g:"ישן יותר"},
+  {v:"1.18",   pf:8,  g:"ישן יותר"},
+  {v:"1.17.1", pf:7,  g:"ישן יותר"},
+  {v:"1.17",   pf:7,  g:"ישן יותר"},
+  {v:"1.16.5", pf:6,  g:"ישן יותר"},
+  {v:"1.16.2", pf:6,  g:"ישן יותר"},
+  {v:"1.16.1", pf:5,  g:"ישן יותר"},
+  {v:"1.15.2", pf:5,  g:"ישן יותר"},
+  {v:"1.14.4", pf:4,  g:"ישן יותר"},
+  {v:"1.13.2", pf:4,  g:"ישן יותר"},
+  {v:"1.12.2", pf:3,  g:"ישן יותר"},
+  {v:"1.11.2", pf:3,  g:"ישן יותר"},
+  {v:"1.10.2", pf:2,  g:"ישן יותר"},
+  {v:"1.9",    pf:2,  g:"ישן יותר"},
+  {v:"1.8.9",  pf:1,  g:"ישן יותר"},
+  {v:"1.6.1",  pf:1,  g:"ישן יותר"},
+];
+const pfFor = v => (VERSIONS.find(x=>x.v===v)||{}).pf || 34;
+// בונה <optgroup> לפי דור, עם תמיכה בגרסה מותאמת אישית ששמורה בפרויקט
+function buildVerOptions(selected){
+  const groups = [];
+  const seen = new Set();
+  VERSIONS.forEach(x=>{ if(!seen.has(x.g)){ seen.add(x.g); groups.push(x.g); } });
+  let html = groups.map(g=>{
+    const opts = VERSIONS.filter(x=>x.g===g).map(x=>
+      `<option value="${x.v}" ${x.v===selected?"selected":""}>${x.v} — pack_format ${x.pf}</option>`).join("");
+    return `<optgroup label="${g}">${opts}</optgroup>`;
+  }).join("");
+  // אם הגרסה השמורה אינה ברשימה (מותאמת אישית) — נוסיף אותה למעלה
+  if(selected && !VERSIONS.some(x=>x.v===selected)){
+    html = `<optgroup label="מותאם אישית"><option value="${escapeAttr(selected)}" selected>${escapeHtml(selected)}</option></optgroup>` + html;
+  }
+  return html;
+}
+
+// ---------- IndexedDB (בייטים של ZIPים שהועלו) ----------
+const DB = (()=>{
+  let dbp;
+  function open(){
+    if(dbp) return dbp;
+    dbp = new Promise((res,rej)=>{
+      const r = indexedDB.open("rpm-blobs",1);
+      r.onupgradeneeded = ()=> r.result.createObjectStore("blobs");
+      r.onsuccess = ()=> res(r.result);
+      r.onerror = ()=> rej(r.error);
+    });
+    return dbp;
+  }
+  const tx = (mode,fn)=> open().then(db=> new Promise((res,rej)=>{
+    const t = db.transaction("blobs",mode);
+    const s = t.objectStore("blobs");
+    const rq = fn(s);
+    t.oncomplete = ()=> res(rq && rq.result);
+    t.onerror = ()=> rej(t.error);
+  }));
+  return {
+    put:(key,buf)=> tx("readwrite",s=>s.put(buf,key)),
+    get:(key)=> tx("readonly",s=>s.get(key)),
+    del:(key)=> tx("readwrite",s=>s.delete(key)),
+  };
+})();
+
+// ---------- אחסון פרויקטים (localStorage) ----------
+const LS_KEY = "rpm.projects.v1";
+const LS_SEL = "rpm.selected.v1";
+let state = load();
+let selectedId = localStorage.getItem(LS_SEL) || (state[0] && state[0].id) || null;
+
+function load(){
+  try{ return JSON.parse(localStorage.getItem(LS_KEY)) || []; }catch{ return []; }
+}
+function save(){
+  localStorage.setItem(LS_KEY, JSON.stringify(state));
+  updateBadge();
+}
+function updateBadge(){
+  const nSrc = state.reduce((a,p)=>a+p.sources.length,0);
+  document.getElementById("storeBadge").textContent =
+    `${state.length} פרויקטים · ${nSrc} מקורות`;
+}
+const uid = ()=> Math.random().toString(36).slice(2,10);
+const curProj = ()=> state.find(p=>p.id===selectedId);
+
+// ---------- Modrinth API ----------
+function parseModrinthSlug(url){
+  try{
+    const u = new URL(url);
+    if(!/modrinth\.com$/.test(u.hostname.replace(/^www\./,''))) return null;
+    const parts = u.pathname.split("/").filter(Boolean);
+    // /resourcepack/{slug} | /mod/{slug} | /{slug}
+    const known = ["resourcepack","mod","datapack","shader","plugin"];
+    if(parts.length>=2 && known.includes(parts[0])) return parts[1];
+    return parts[parts.length-1] || null;
+  }catch{ return null; }
+}
+async function modrinthProject(slug){
+  const r = await fetch(`https://api.modrinth.com/v2/project/${encodeURIComponent(slug)}`);
+  if(!r.ok) throw new Error(`Modrinth: פרויקט לא נמצא (${r.status})`);
+  return r.json();
+}
+async function modrinthVersions(slug){
+  const r = await fetch(`https://api.modrinth.com/v2/project/${encodeURIComponent(slug)}/version`);
+  if(!r.ok) throw new Error(`Modrinth: לא ניתן לטעון גרסאות (${r.status})`);
+  return r.json();
+}
+
+// ---------- זיהוי סוג מקור מקישור ----------
+function detectKind(url){
+  try{
+    const h = new URL(url).hostname.replace(/^www\./,'');
+    if(/modrinth\.com$/.test(h)) return "modrinth";
+    if(/curseforge\.com$/.test(h)) return "curseforge";
+    if(/planetminecraft\.com$/.test(h)) return "planetminecraft";
+  }catch{}
+  return null;
+}
+
+/* ============================================================
+   רינדור
+   ============================================================ */
+function renderProjects(){
+  const el = document.getElementById("projectList");
+  el.innerHTML = "";
+  if(!state.length){
+    el.innerHTML = `<div class="empty" style="margin-top:30px; font-size:12px">אין פרויקטים.<br>צור פרויקט חדש ↑</div>`;
+    return;
+  }
+  state.forEach(p=>{
+    const d = document.createElement("div");
+    d.className = "proj"+(p.id===selectedId?" active":"");
+    d.innerHTML = `<div class="nm">${escapeHtml(p.name)}</div>
+      <span class="ct">${p.sources.length}</span>`;
+    d.onclick = ()=>{ selectedId=p.id; localStorage.setItem(LS_SEL,p.id); renderAll(); };
+    el.appendChild(d);
+  });
+}
+
+function renderMain(){
+  const main = document.getElementById("main");
+  const p = curProj();
+  if(!p){
+    main.innerHTML = `<div class="empty">בחר פרויקט מהצד, או צור אחד חדש כדי להתחיל.<br><br>
+      <span style="font-size:12px">כל פרויקט = חבילת משאבים ממוזגת אחת שאפשר לערוך בכל עת.</span></div>`;
+    return;
+  }
+  const verOpts = buildVerOptions(p.targetVersion);
+  main.innerHTML = `
+    <h2 id="pTitle"></h2>
+    <div class="sub">חבילת משאבים ממוזגת — המקור העליון גובר על התחתונים</div>
+
+    <div class="card">
+      <h3>⚙️ הגדרות חבילה</h3>
+      <div class="row">
+        <label class="fld">שם החבילה
+          <input type="text" id="pName" value="${escapeAttr(p.name)}">
+        </label>
+        <label class="fld">גרסת מיינקראפט יעד
+          <select id="pVer">${verOpts}</select>
+        </label>
+        <label class="fld">pack_format
+          <input type="number" id="pPf" value="${p.packFormat}" style="min-width:90px">
+        </label>
+      </div>
+      <label class="fld" style="margin-top:10px">תיאור (נכנס ל־pack.mcmeta)
+        <input type="text" id="pDesc" value="${escapeAttr(p.description||"")}" style="min-width:340px">
+      </label>
+    </div>
+
+    <div class="card">
+      <h3>📦 מקורות (${p.sources.length}) <span class="hint" style="margin:0 6px">— סדר = עדיפות; 1 גובר</span></h3>
+      <div id="srcList"></div>
+      <div class="toolbar">
+        <button id="addSrcBtn" class="ghost">➕ הוסף מקור</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>🔨 מיזוג ובנייה</h3>
+      <div class="toolbar">
+        <button id="buildBtn" class="ok">בנה חבילה ממוזגת (ZIP)</button>
+        <span class="hint" style="margin:0">מוריד מ־Modrinth וממזג הכל לקובץ אחד</span>
+      </div>
+      <div class="log" id="buildLog" style="display:none"></div>
+    </div>
+  `;
+  document.getElementById("pTitle").textContent = p.name;
+  // events
+  const bind=(id,ev,fn)=>document.getElementById(id).addEventListener(ev,fn);
+  bind("pName","input",e=>{ p.name=e.target.value||"ללא שם"; document.getElementById("pTitle").textContent=p.name; save(); renderProjects(); });
+  bind("pVer","change",e=>{ p.targetVersion=e.target.value; p.packFormat=pfFor(e.target.value); document.getElementById("pPf").value=p.packFormat; save(); });
+  bind("pPf","input",e=>{ p.packFormat=parseInt(e.target.value)||p.packFormat; save(); });
+  bind("pDesc","input",e=>{ p.description=e.target.value; save(); });
+  bind("addSrcBtn","click",openAddDialog);
+  bind("buildBtn","click",buildProject);
+  renderSources();
+}
+
+let dragSrcId = null;
+
+function renderSources(){
+  const p = curProj();
+  const list = document.getElementById("srcList");
+  if(!list) return;
+  if(!p.sources.length){
+    list.innerHTML = `<div class="hint">אין מקורות עדיין. הוסף חבילה מ־Modrinth/CurseForge/PlanetMinecraft או העלה ZIP.</div>`;
+    return;
+  }
+  const icons = {modrinth:"🟢",curseforge:"🔥",planetminecraft:"🌍",upload:"📁"};
+  list.innerHTML = "";
+  // מקרא עדיפות
+  const legend = document.createElement("div");
+  legend.className = "prio-legend";
+  legend.innerHTML = `<span>⬆️ <b>1 = הכי חשוב</b> (גובר על השאר)</span>
+    <span class="dim">גרור לפי הידית ⠿ או השתמש ב־▲▼ כדי לסדר עדיפות</span>`;
+  list.appendChild(legend);
+  p.sources.forEach((s,i)=>{
+    const div = document.createElement("div");
+    div.className = "src"+(s.enabled?"":" disabled");
+    div.dataset.id = s.id;
+    let statusChip = "";
+    if(s.kind==="modrinth" && s.downloadUrl) statusChip = `<span class="chip m">אוטומטי</span>`;
+    else if(s.hasBlob) statusChip = `<span class="chip m">ZIP מצורף</span>`;
+    else statusChip = `<span class="chip warnc">חסר ZIP</span>`;
+    const desc = s.versionName ? `${s.kind} · גרסה: ${escapeHtml(s.versionName)}`
+               : s.filename ? `${s.kind} · ${escapeHtml(s.filename)}`
+               : s.refUrl ? escapeHtml(s.refUrl) : s.kind;
+    const prioTag = i===0 ? `<span class="prio-tag top">הכי חשוב</span>`
+                  : i===p.sources.length-1 ? `<span class="prio-tag bottom">בסיס/גיבוי</span>` : "";
+    div.innerHTML = `
+      <div class="grip" title="גרור לשינוי עדיפות">⠿</div>
+      <div class="prio">${i+1}</div>
+      <div class="ico">${icons[s.kind]||"❓"}</div>
+      <div class="info">
+        <div class="t">${escapeHtml(s.title||"מקור")} ${statusChip} ${prioTag}</div>
+        <div class="d">${desc}</div>
+      </div>
+      <div class="ctrls">
+        <button class="ghost sm" data-act="up" ${i===0?"disabled":""} title="העלה עדיפות">▲</button>
+        <button class="ghost sm" data-act="down" ${i===p.sources.length-1?"disabled":""} title="הורד עדיפות">▼</button>
+        <button class="ghost sm" data-act="toggle" title="הפעל/כבה">${s.enabled?"👁":"🚫"}</button>
+        <button class="danger sm" data-act="del" title="מחק">🗑</button>
+      </div>`;
+    div.querySelectorAll("button[data-act]").forEach(b=>{
+      b.onclick = ()=>srcAction(s.id,b.dataset.act);
+    });
+    // גרירה לשינוי סדר — מופעלת רק דרך הידית
+    const grip = div.querySelector(".grip");
+    grip.addEventListener("mousedown",()=>{ div.draggable=true; });
+    div.addEventListener("dragstart",e=>{ dragSrcId=s.id; div.classList.add("dragging"); e.dataTransfer.effectAllowed="move"; });
+    div.addEventListener("dragend",()=>{ div.draggable=false; div.classList.remove("dragging"); document.querySelectorAll(".src.over").forEach(x=>x.classList.remove("over")); });
+    div.addEventListener("dragover",e=>{ e.preventDefault(); e.dataTransfer.dropEffect="move"; div.classList.add("over"); });
+    div.addEventListener("dragleave",()=>div.classList.remove("over"));
+    div.addEventListener("drop",e=>{ e.preventDefault(); div.classList.remove("over"); moveSource(dragSrcId, s.id); });
+    list.appendChild(div);
+  });
+}
+
+function moveSource(fromId,toId){
+  if(!fromId || fromId===toId) return;
+  const p = curProj();
+  const from = p.sources.findIndex(s=>s.id===fromId);
+  let to = p.sources.findIndex(s=>s.id===toId);
+  if(from<0||to<0) return;
+  const [moved] = p.sources.splice(from,1);
+  to = p.sources.findIndex(s=>s.id===toId); // מחשבים מחדש אחרי ההסרה
+  p.sources.splice(to,0,moved);
+  save(); renderSources(); renderProjects();
+}
+
+function srcAction(sid,act){
+  const p = curProj();
+  const i = p.sources.findIndex(s=>s.id===sid);
+  if(i<0) return;
+  if(act==="up" && i>0){ [p.sources[i-1],p.sources[i]]=[p.sources[i],p.sources[i-1]]; }
+  if(act==="down" && i<p.sources.length-1){ [p.sources[i+1],p.sources[i]]=[p.sources[i],p.sources[i+1]]; }
+  if(act==="toggle"){ p.sources[i].enabled=!p.sources[i].enabled; }
+  if(act==="del"){
+    if(!confirm("למחוק את המקור הזה מהפרויקט?")) return;
+    if(p.sources[i].hasBlob) DB.del(sid).catch(()=>{});
+    p.sources.splice(i,1);
+  }
+  save(); renderSources(); renderProjects();
+}
+
+function renderAll(){ renderProjects(); renderMain(); updateBadge(); }
+
+/* ============================================================
+   דיאלוג הוספת מקור
+   ============================================================ */
+let addKind = "modrinth";
+let resolvedVersions = null;
+let selectedVersion = null;
+let resolvedProject = null;
+
+function openAddDialog(){
+  addKind = "modrinth";
+  resolvedVersions = null; selectedVersion = null; resolvedProject = null;
+  document.getElementById("tgtVerLbl").textContent = curProj().targetVersion;
+  document.getElementById("srcUrl").value = "";
+  document.getElementById("resolveStatus").textContent = "";
+  document.getElementById("verList").style.display="none";
+  document.getElementById("verList").innerHTML="";
+  document.getElementById("srcFile").value="";
+  document.getElementById("manualFile").value="";
+  document.querySelectorAll("#kindSeg button").forEach(b=>b.classList.toggle("on",b.dataset.kind==="modrinth"));
+  updateAddUI();
+  document.getElementById("addDlg").showModal();
+}
+
+function updateAddUI(){
+  const isUpload = addKind==="upload";
+  const isModrinth = addKind==="modrinth";
+  const isManual = addKind==="curseforge"||addKind==="planetminecraft";
+  document.getElementById("linkArea").style.display = isUpload?"none":"block";
+  document.getElementById("uploadArea").style.display = isUpload?"block":"none";
+  document.getElementById("manualZip").style.display = isManual?"block":"none";
+  document.getElementById("resolveBtn").style.display = isModrinth?"inline-block":"none";
+  document.getElementById("onlyCompat").parentElement.style.display = isModrinth?"flex":"none";
+  const hints = {
+    modrinth:"הדבק קישור לעמוד החבילה ב־Modrinth, ואז 'חפש גרסאות'.",
+    curseforge:"הדבק קישור ל־CurseForge (לתיעוד בלבד).",
+    planetminecraft:"הדבק קישור ל־PlanetMinecraft (לתיעוד בלבד).",
+  };
+  document.getElementById("linkHint").textContent = hints[addKind]||"";
+  const ph = {modrinth:"https://modrinth.com/resourcepack/...",
+    curseforge:"https://www.curseforge.com/minecraft/texture-packs/...",
+    planetminecraft:"https://www.planetminecraft.com/texture-pack/..."};
+  document.getElementById("srcUrl").placeholder = ph[addKind]||"";
+}
+
+document.getElementById("kindSeg").addEventListener("click",e=>{
+  const b = e.target.closest("button"); if(!b) return;
+  addKind = b.dataset.kind;
+  document.querySelectorAll("#kindSeg button").forEach(x=>x.classList.toggle("on",x===b));
+  resolvedVersions=null; selectedVersion=null;
+  document.getElementById("verList").style.display="none";
+  document.getElementById("resolveStatus").textContent="";
+  updateAddUI();
+});
+
+document.getElementById("resolveBtn").addEventListener("click",async()=>{
+  const url = document.getElementById("srcUrl").value.trim();
+  const st = document.getElementById("resolveStatus");
+  const slug = parseModrinthSlug(url);
+  if(!slug){ st.innerHTML = `<span style="color:var(--danger)">קישור Modrinth לא תקין</span>`; return; }
+  st.innerHTML = `<span class="spinner"></span> טוען...`;
+  try{
+    resolvedProject = await modrinthProject(slug);
+    resolvedVersions = await modrinthVersions(slug);
+    st.innerHTML = `<span style="color:var(--accent2)">נמצאו ${resolvedVersions.length} גרסאות · ${escapeHtml(resolvedProject.title)}</span>`;
+    renderVerList();
+  }catch(err){
+    st.innerHTML = `<span style="color:var(--danger)">${escapeHtml(err.message)}</span>`;
+  }
+});
+
+document.getElementById("onlyCompat").addEventListener("change",renderVerList);
+
+function renderVerList(){
+  const box = document.getElementById("verList");
+  if(!resolvedVersions){ box.style.display="none"; return; }
+  const only = document.getElementById("onlyCompat").checked;
+  const tgt = curProj().targetVersion;
+  let vers = resolvedVersions;
+  if(only) vers = vers.filter(v=> (v.game_versions||[]).includes(tgt));
+  box.style.display="block";
+  if(!vers.length){ box.innerHTML = `<div class="ver"><span class="vn">אין גרסאות תואמות ל־${tgt}. בטל את הסינון כדי לראות הכל.</span></div>`; return; }
+  box.innerHTML="";
+  vers.forEach(v=>{
+    const d = document.createElement("div");
+    d.className="ver"+(selectedVersion&&selectedVersion.id===v.id?" sel":"");
+    const gv = (v.game_versions||[]).slice(0,6).join(", ");
+    d.innerHTML = `<div class="vn"><b>${escapeHtml(v.name||v.version_number)}</b> <span class="vg">${escapeHtml(v.version_number)}</span></div>
+      <div class="vg">${escapeHtml(gv)}</div>`;
+    d.onclick = ()=>{ selectedVersion=v; renderVerList(); };
+    box.appendChild(d);
+  });
+}
+
+document.getElementById("addConfirm").addEventListener("click",async()=>{
+  const p = curProj();
+  try{
+    if(addKind==="modrinth"){
+      if(!selectedVersion){ alert("בחר גרסה מהרשימה (או לחץ 'חפש גרסאות' קודם)."); return; }
+      const file = (selectedVersion.files||[]).find(f=>f.primary) || selectedVersion.files[0];
+      if(!file){ alert("לגרסה שנבחרה אין קובץ להורדה."); return; }
+      p.sources.unshift({
+        id:uid(), kind:"modrinth", enabled:true,
+        title: resolvedProject?resolvedProject.title:parseModrinthSlug(document.getElementById("srcUrl").value),
+        refUrl: document.getElementById("srcUrl").value.trim(),
+        modrinthProject: resolvedProject?resolvedProject.slug:null,
+        versionId: selectedVersion.id,
+        versionName: selectedVersion.version_number,
+        downloadUrl: file.url,
+        filename: file.filename,
+        gameVersions: selectedVersion.game_versions||[],
+        hasBlob:false,
+      });
+    } else if(addKind==="upload"){
+      const files = document.getElementById("srcFile").files;
+      if(!files.length){ alert("בחר קובץ ZIP אחד לפחות."); return; }
+      for(const f of files){
+        const id = uid();
+        await DB.put(id, await f.arrayBuffer());
+        p.sources.unshift({
+          id, kind:"upload", enabled:true,
+          title: f.name.replace(/\.zip$/i,""), filename:f.name,
+          refUrl:null, hasBlob:true,
+        });
+      }
+    } else { // curseforge / planetminecraft (manual)
+      const url = document.getElementById("srcUrl").value.trim();
+      const mf = document.getElementById("manualFile").files[0];
+      if(!url && !mf){ alert("הדבק קישור או צרף קובץ ZIP."); return; }
+      const id = uid();
+      let hasBlob=false, filename=null;
+      if(mf){ await DB.put(id, await mf.arrayBuffer()); hasBlob=true; filename=mf.name; }
+      p.sources.unshift({
+        id, kind:addKind, enabled:true,
+        title: filename? filename.replace(/\.zip$/i,"") : (url.split("/").filter(Boolean).pop()||addKind),
+        refUrl:url||null, filename, hasBlob,
+      });
+    }
+    save(); renderSources(); renderProjects();
+    document.getElementById("addDlg").close();
+  }catch(err){
+    alert("שגיאה: "+err.message);
+  }
+});
+
+/* ============================================================
+   מנוע המיזוג
+   ============================================================ */
+function logLine(html,cls){
+  const box = document.getElementById("buildLog");
+  box.style.display="block";
+  const span = document.createElement("div");
+  if(cls) span.className=cls;
+  span.innerHTML = html;
+  box.appendChild(span);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function getSourceBytes(s){
+  if(s.kind==="modrinth" && s.downloadUrl){
+    const r = await fetch(s.downloadUrl);
+    if(!r.ok) throw new Error(`הורדה נכשלה (${r.status})`);
+    return await r.arrayBuffer();
+  }
+  if(s.hasBlob){
+    const buf = await DB.get(s.id);
+    if(!buf) throw new Error("קובץ ה־ZIP חסר באחסון");
+    return buf;
+  }
+  throw new Error("אין מקור בייטים (העלה ZIP)");
+}
+
+// מציאת קידומת השורש בתוך ZIP (טיפול ב־ZIP עטוף בתיקייה)
+function findRootPrefix(zip){
+  const paths = Object.keys(zip.files).filter(p=>!zip.files[p].dir);
+  // מחפשים pack.mcmeta הקצר ביותר
+  let mcmeta = paths.filter(p=>p.endsWith("pack.mcmeta")).sort((a,b)=>a.length-b.length)[0];
+  if(mcmeta){ return mcmeta.slice(0, mcmeta.length-"pack.mcmeta".length); }
+  // אחרת מחפשים assets/
+  let assetsP = paths.find(p=>/(^|\/)assets\//.test(p));
+  if(assetsP){ return assetsP.slice(0, assetsP.indexOf("assets/")); }
+  return "";
+}
+
+async function buildProject(){
+  const p = curProj();
+  const log = document.getElementById("buildLog");
+  log.style.display="block"; log.innerHTML="";
+  const btn = document.getElementById("buildBtn");
+  btn.disabled=true;
+  try{
+    const sources = p.sources.filter(s=>s.enabled);
+    if(!sources.length){ logLine("אין מקורות פעילים.","err"); return; }
+    logLine(`מתחיל מיזוג של <b>${sources.length}</b> מקורות → "${escapeHtml(p.name)}"`,"dim");
+
+    // מ־top לתחתון. index 0 = הכי גבוה (גובר)
+    const out = new JSZip();
+    const claimed = new Map();       // path -> {title} (מי כתב ראשון = גבר)
+    const conflicts = [];            // {path, winner, loser}
+    const jsonOverlaps = [];         // JSON חופפים לבדיקה ידנית
+    let iconBytes = null, iconFrom=null;
+
+    for(let i=0;i<sources.length;i++){
+      const s = sources[i];
+      logLine(`<span class="dim">[${i+1}/${sources.length}]</span> ${escapeHtml(s.title)} — טוען...`);
+      let bytes;
+      try{ bytes = await getSourceBytes(s); }
+      catch(err){ logLine(`&nbsp;&nbsp;↳ דילוג: ${escapeHtml(err.message)}`,"err"); continue; }
+
+      let zip;
+      try{ zip = await JSZip.loadAsync(bytes); }
+      catch(err){ logLine(`&nbsp;&nbsp;↳ קובץ ZIP לא תקין, דילוג`,"err"); continue; }
+
+      const prefix = findRootPrefix(zip);
+      const entries = Object.keys(zip.files).filter(pth=>!zip.files[pth].dir);
+      let added=0, over=0;
+      for(const pth of entries){
+        if(!pth.startsWith(prefix)) continue;
+        let rel = pth.slice(prefix.length);
+        if(!rel) continue;
+        // מדלגים על מטא־דאטה של המקור (ניצור חדש)
+        if(rel==="pack.mcmeta"){ continue; }
+        if(rel==="pack.png"){ if(!iconBytes){ iconBytes = await zip.files[pth].async("uint8array"); iconFrom=s.title; } continue; }
+
+        if(claimed.has(rel)){
+          over++;
+          conflicts.push({path:rel, winner:claimed.get(rel).title, loser:s.title});
+          if(/\.(json|txt)$/.test(rel) && /(sounds\.json|\/lang\/|\.lang$)/.test(rel)){
+            jsonOverlaps.push({path:rel, winner:claimed.get(rel).title, loser:s.title});
+          }
+          continue; // כבר נכתב ע"י מקור בעדיפות גבוהה יותר
+        }
+        const data = await zip.files[pth].async("uint8array");
+        out.file(rel, data);
+        claimed.set(rel,{title:s.title});
+        added++;
+      }
+      logLine(`&nbsp;&nbsp;↳ נוספו <b>${added}</b> קבצים, ${over} נדרסו (עדיפות נמוכה)`, "ok");
+    }
+
+    if(!claimed.size){ logLine("לא נמצאו קבצים למיזוג.","err"); return; }
+
+    // pack.mcmeta חדש
+    const mcmeta = {
+      pack:{
+        pack_format: p.packFormat,
+        description: p.description || `${p.name} — merged pack`
+      }
+    };
+    out.file("pack.mcmeta", JSON.stringify(mcmeta,null,2));
+    if(iconBytes){ out.file("pack.png", iconBytes); logLine(`אייקון pack.png נלקח מ־"${escapeHtml(iconFrom)}"`,"dim"); }
+
+    logLine(`<b>${claimed.size}</b> קבצים ייחודיים · <b>${conflicts.length}</b> התנגשויות נפתרו לפי עדיפות`,"ok");
+    if(jsonOverlaps.length){
+      logLine(`⚠️ ${jsonOverlaps.length} קבצי sounds.json/שפה חופפים — מיינקראפט לוקח את הקובץ השלם מהמקור העליון. אם צריך מיזוג תוכן, בדוק ידנית:`,"warn");
+      jsonOverlaps.slice(0,8).forEach(c=>logLine(`&nbsp;&nbsp;• ${escapeHtml(c.path)} (נשמר: ${escapeHtml(c.winner)})`,"warn"));
+    }
+
+    logLine("דוחס ל־ZIP...","dim");
+    const blob = await out.generateAsync({type:"blob",compression:"DEFLATE",compressionOptions:{level:6}});
+    const fname = (p.name||"pack").replace(/[^\w֐-׿ .-]/g,"_")+".zip";
+    downloadBlob(blob,fname);
+    logLine(`✅ הושלם! הורד: <b>${escapeHtml(fname)}</b> (${(blob.size/1024/1024).toFixed(2)} MB)`,"ok");
+  }catch(err){
+    logLine("שגיאה כללית: "+escapeHtml(err.message),"err");
+    console.error(err);
+  }finally{
+    btn.disabled=false;
+  }
+}
+
+/* ============================================================
+   עזרים
+   ============================================================ */
+function downloadBlob(blob,name){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+}
+function escapeHtml(s){ return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function escapeAttr(s){ return escapeHtml(s).replace(/"/g,"&quot;"); }
+
+// ---------- פרויקט חדש ----------
+document.getElementById("newProjBtn").addEventListener("click",()=>{
+  const defVer = "1.21.6";
+  const p = {
+    id:uid(), name:"חבילה חדשה", targetVersion:defVer, packFormat:pfFor(defVer),
+    description:"", sources:[],
+  };
+  state.unshift(p); selectedId=p.id; localStorage.setItem(LS_SEL,p.id);
+  save(); renderAll();
+  setTimeout(()=>{ const el=document.getElementById("pName"); if(el){el.focus();el.select();} },50);
+});
+
+// ---------- אתחול ----------
+renderAll();
+</script>
+</body>
+</html>

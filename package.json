@@ -1,0 +1,14 @@
+{
+  "name": "resource-packs-minecraft-manager",
+  "version": "1.0.0",
+  "description": "Merge Minecraft resource packs from Modrinth / CurseForge / PlanetMinecraft links and uploaded ZIPs into one pack.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "busboy": "^1.6.0",
+    "jszip": "^3.10.1"
+  }
+}
